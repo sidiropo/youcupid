@@ -1,4 +1,4 @@
-# YouCupid - Decentralized Dating App
+# YouCupid - A Decentralized Dating App
 
 YouCupid is a decentralized dating application built on the nostr protocol. It allows users to connect with their friends, create matches between them, and communicate securely through encrypted direct messages.
 
