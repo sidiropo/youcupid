@@ -1,9 +1,9 @@
 'use client';
 
 import { useNostr } from '@/lib/nostr/NostrContext';
-import { useRouter } from 'next/navigation';
-import { useEffect, useState, useRef, use } from 'react';
-import { NDKEvent, NDKFilter, NDKUser } from '@nostr-dev-kit/ndk';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useEffect, useState, useRef } from 'react';
+import { NDKEvent, NDKFilter } from '@nostr-dev-kit/ndk';
 
 interface Message {
   id: string;
@@ -12,21 +12,20 @@ interface Message {
   pubkey: string;
 }
 
-interface PageProps {
-  params: Promise<{ pubkey: string }>;
-}
-
-export default function MessagesPage({ params }: PageProps) {
+export default function MessagesClient() {
   const { ndk, user, publicKey } = useNostr();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { pubkey } = use(params);
+  
+  // Get pubkey from query parameter
+  const pubkey = searchParams.get('pubkey');
 
   useEffect(() => {
-    if (!user || !ndk) {
+    if (!user || !ndk || !pubkey) {
       router.push('/');
       return;
     }
@@ -97,7 +96,7 @@ export default function MessagesPage({ params }: PageProps) {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMessage.trim() || !ndk) return;
+    if (!newMessage.trim() || !ndk || !pubkey) return;
 
     try {
       const event = new NDKEvent(ndk);
@@ -114,6 +113,14 @@ export default function MessagesPage({ params }: PageProps) {
       alert('Failed to send message. Please try again.');
     }
   };
+
+  if (!pubkey) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-2xl text-gray-600">Invalid user</div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

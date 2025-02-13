@@ -1,14 +1,55 @@
 'use client';
 
-import NDK, { 
-  NDKEvent, 
-  NDKFilter, 
-  NDKUser, 
-  NostrEvent,
-  NDKSigner,
-  NDKPrivateKeySigner
-} from '@nostr-dev-kit/ndk';
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { 
+  createContext, 
+  useContext, 
+  useEffect, 
+  useState, 
+  ReactNode, 
+  useCallback 
+} from 'react';
+
+interface NDKEvent {
+  id: string;
+  kind: number;
+  pubkey: string;
+  content: string;
+  created_at?: number;
+  tags: string[][];
+  sig?: string;
+  encrypt(recipientUser: NDKUser): Promise<void>;
+  sign(): Promise<void>;
+  publish(): Promise<void>;
+  toNostrEvent(): Promise<void>;
+}
+
+interface NDKUser {
+  pubkey: string;
+  profile?: {
+    name?: string;
+  };
+  fetchProfile(): Promise<void>;
+}
+
+interface NDKFilter {
+  kinds?: number[];
+  authors?: string[];
+  '#p'?: string[];
+  '#t'?: string[];
+  ids?: string[];
+  since?: number;
+}
+
+interface NDK {
+  connect(): Promise<void>;
+  fetchEvents(filter: NDKFilter): Promise<Set<NDKEvent>>;
+  fetchEvent(filter: NDKFilter): Promise<NDKEvent | null>;
+  getUser(opts: { pubkey: string }): NDKUser;
+  subscribe(filter: NDKFilter, opts?: { closeOnEose: boolean }): {
+    on(event: string, callback: (event: NDKEvent) => void): void;
+    stop(): void;
+  };
+}
 
 interface Nip07RelayMap {
   [url: string]: { read: boolean; write: boolean };
@@ -38,6 +79,14 @@ declare global {
   }
 }
 
+interface NostrEvent {
+  kind: number;
+  created_at: number;
+  content: string;
+  tags: string[][];
+  pubkey: string;
+}
+
 interface NostrContextType {
   ndk: NDK | null;
   user: NDKUser | null;
@@ -62,32 +111,39 @@ export function NostrProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<NDKUser | null>(null);
   const [publicKey, setPublicKey] = useState<string | null>(null);
   const [relays, setRelays] = useState<string[]>([
-    'wss://relay.damus.io',
-    'wss://relay.nostr.band',
-    'wss://nos.lol',
+    'wss://purplepag.es',
     'wss://relay.snort.social',
-    'wss://nostr.mom',
+    'wss://relay.damus.io',
+    'wss://nostr.wine',
   ]);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    initializeNDK();
-  }, [relays]);
-
-  const initializeNDK = async () => {
+  const initializeNDK = useCallback(async () => {
     try {
-      const newNdk = new NDK({
+      const NDKModule = await import('@nostr-dev-kit/ndk');
+      const newNdk = new NDKModule.default({
         explicitRelayUrls: relays,
+        enableOutboxModel: true, // This helps with offline/failed relay scenarios
       });
       
-      await newNdk.connect();
+      // Don't wait for connect, just set the NDK instance
       setNdk(newNdk);
+      
+      // Try to connect in the background
+      newNdk.connect().catch((error) => {
+        console.warn('Some relays failed to connect:', error);
+        // Continue anyway as we can still function with some failed relays
+      });
     } catch (error) {
       console.error('Failed to initialize NDK:', error);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [relays]);
+
+  useEffect(() => {
+    initializeNDK();
+  }, [initializeNDK]);
 
   const login = async () => {
     if (!ndk) return;
@@ -174,20 +230,38 @@ export function NostrProvider({ children }: { children: ReactNode }) {
   };
 
   const createMatch = async (friend1: string, friend2: string) => {
-    if (!ndk || !publicKey || !window.nostr) return;
+    if (!ndk || !publicKey || !window.nostr) {
+      console.error('Create match prerequisites not met:', { 
+        hasNdk: !!ndk, 
+        hasPublicKey: !!publicKey, 
+        hasNostrExtension: !!window.nostr 
+      });
+      throw new Error('Missing required nostr components');
+    }
     
     try {
+      console.log('Starting match creation between:', friend1, friend2);
+      
       // Get user profiles for both friends
       const friend1User = ndk.getUser({ pubkey: friend1 });
       const friend2User = ndk.getUser({ pubkey: friend2 });
-      await Promise.all([
-        friend1User.fetchProfile(),
-        friend2User.fetchProfile(),
-      ]);
+      
+      console.log('Fetching user profiles...');
+      try {
+        await Promise.all([
+          friend1User.fetchProfile(),
+          friend2User.fetchProfile(),
+        ]);
+        console.log('Successfully fetched profiles');
+      } catch (error) {
+        console.error('Failed to fetch user profiles:', error);
+        throw error;
+      }
 
       const friend1Name = friend1User.profile?.name || friend1.slice(0, 8);
       const friend2Name = friend2User.profile?.name || friend2.slice(0, 8);
 
+      console.log('Creating event data...');
       // Create a raw nostr event
       const eventData: Partial<NostrEvent> = {
         kind: 1,
@@ -203,45 +277,53 @@ export function NostrProvider({ children }: { children: ReactNode }) {
         pubkey: publicKey,
       };
 
+      console.log('Signing event...');
       // Sign the event using the extension
-      const signedEvent = await window.nostr.signEvent(eventData as NostrEvent);
+      try {
+        const signedEvent = await window.nostr.signEvent(eventData as NostrEvent);
+        console.log('Event signed successfully');
 
-      // Create NDK event from the signed data
-      const event = new NDKEvent(ndk);
-      event.kind = eventData.kind!;
-      event.created_at = eventData.created_at!;
-      event.content = eventData.content!;
-      event.pubkey = eventData.pubkey!;
-      event.tags = eventData.tags!;
-      event.sig = signedEvent.sig;
+        // Create NDK event
+        const NDKModule = await import('@nostr-dev-kit/ndk');
+        const event = new NDKModule.NDKEvent(ndk, eventData as NostrEvent);
+        event.sig = signedEvent.sig;
 
-      // Calculate event ID
-      await event.toNostrEvent();
+        // Calculate event ID
+        await event.toNostrEvent();
+        console.log('Event created with ID:', event.id);
 
-      // Publish with options
-      const publishPromise = event.publish();
-      
-      // Wait for either successful publish or timeout
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Publish timeout')), 5000);
-      });
+        console.log('Publishing event...');
+        // Publish with options
+        const publishPromise = event.publish();
+        
+        // Wait for either successful publish or timeout
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Publish timeout')), 5000);
+        });
 
-      await Promise.race([publishPromise, timeoutPromise]);
+        await Promise.race([publishPromise, timeoutPromise]);
+        console.log('Event published successfully');
 
-      // Wait a moment to ensure propagation
-      await new Promise(resolve => setTimeout(resolve, 1000));
+        // Wait a moment to ensure propagation
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
-      // Try to fetch the event to verify it was published
-      const verifyFilter: NDKFilter = {
-        kinds: [1],
-        ids: [event.id],
-      };
+        // Try to fetch the event to verify it was published
+        console.log('Verifying event publication...');
+        const verifyFilter: NDKFilter = {
+          kinds: [1],
+          ids: [event.id],
+        };
 
-      const published = await ndk.fetchEvent(verifyFilter);
-      if (!published) {
-        throw new Error('Failed to verify event publication');
+        const published = await ndk.fetchEvent(verifyFilter);
+        if (!published) {
+          throw new Error('Failed to verify event publication');
+        }
+        console.log('Event verified successfully');
+
+      } catch (error) {
+        console.error('Error in event signing/publishing:', error);
+        throw error;
       }
-
     } catch (error) {
       console.error('Error creating match:', error);
       throw error;
