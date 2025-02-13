@@ -26,7 +26,7 @@ export default function HomeClient() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center p-4">
       <div className="text-center space-y-6 max-w-2xl mx-auto">
-        <h1 className="text-5xl font-bold bg-gradient-to-r from-rose-600 to-lime-600 bg-clip-text text-transparent">
+        <h1 className="text-5xl font-bold bg-gradient-to-r from-rose-600 to-custom-green-500 bg-clip-text text-transparent">
           YouCupid
         </h1>
         <p className="text-xl text-gray-600">
@@ -36,7 +36,7 @@ export default function HomeClient() {
           <button
             onClick={handleLogin}
             disabled={isLoading}
-            className="px-6 py-3 bg-gradient-to-r from-rose-500 to-lime-500 text-white rounded-lg font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+            className="px-6 py-3 bg-gradient-to-r from-rose-500 to-custom-green-500 text-white rounded-lg font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
           >
             {isLoading ? 'Connecting...' : 'Login with Nostr'}
           </button>

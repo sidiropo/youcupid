@@ -19,7 +19,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <NostrProvider>
-          <main className="min-h-screen bg-gradient-to-b from-rose-100 to-lime-100">
+          <main className="min-h-screen bg-gradient-to-b from-rose-100 to-custom-green-100">
             {children}
           </main>
         </NostrProvider>

@@ -98,7 +98,7 @@ export default function MatchPageClient() {
                 onClick={() => handleFriendSelect(friend.pubkey)}
                 className={`p-4 border rounded-lg cursor-pointer transition-colors ${
                   selectedFriends.includes(friend.pubkey)
-                    ? 'border-lime-500 bg-lime-50'
+                    ? 'border-custom-green-500 bg-custom-green-50'
                     : 'hover:border-gray-300'
                 }`}
               >
@@ -116,7 +116,7 @@ export default function MatchPageClient() {
           <button
             onClick={handleCreateMatch}
             disabled={selectedFriends.length !== 2}
-            className="px-8 py-3 bg-lime-500 text-white rounded-lg font-semibold hover:bg-lime-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-8 py-3 bg-custom-green-500 text-white rounded-lg font-semibold hover:bg-custom-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {selectedFriends.length === 2
               ? 'Create Match'

@@ -162,7 +162,7 @@ export default function DashboardClient() {
           <div className="space-x-4">
             <button
               onClick={() => router.push('/match')}
-              className="px-4 py-2 bg-lime-500 text-white rounded-lg hover:bg-lime-600"
+              className="px-4 py-2 bg-custom-green-500 text-white rounded-lg hover:bg-custom-green-600"
             >
               Create Match
             </button>
@@ -183,7 +183,7 @@ export default function DashboardClient() {
                 onClick={() => setActiveTab('profile')}
                 className={`px-6 py-3 text-sm font-medium ${
                   activeTab === 'profile'
-                    ? 'border-b-2 border-lime-500 text-lime-600'
+                    ? 'border-b-2 border-custom-green-500 text-custom-green-600'
                     : 'text-gray-500 hover:text-gray-700'
                 }`}
               >
@@ -193,7 +193,7 @@ export default function DashboardClient() {
                 onClick={() => setActiveTab('relays')}
                 className={`px-6 py-3 text-sm font-medium ${
                   activeTab === 'relays'
-                    ? 'border-b-2 border-lime-500 text-lime-600'
+                    ? 'border-b-2 border-custom-green-500 text-custom-green-600'
                     : 'text-gray-500 hover:text-gray-700'
                 }`}
               >
@@ -203,7 +203,7 @@ export default function DashboardClient() {
                 onClick={() => setActiveTab('matches')}
                 className={`px-6 py-3 text-sm font-medium ${
                   activeTab === 'matches'
-                    ? 'border-b-2 border-lime-500 text-lime-600'
+                    ? 'border-b-2 border-custom-green-500 text-custom-green-600'
                     : 'text-gray-500 hover:text-gray-700'
                 }`}
               >
@@ -213,7 +213,7 @@ export default function DashboardClient() {
                 onClick={() => setActiveTab('created-matches')}
                 className={`px-6 py-3 text-sm font-medium ${
                   activeTab === 'created-matches'
-                    ? 'border-b-2 border-lime-500 text-lime-600'
+                    ? 'border-b-2 border-custom-green-500 text-custom-green-600'
                     : 'text-gray-500 hover:text-gray-700'
                 }`}
               >
@@ -223,7 +223,7 @@ export default function DashboardClient() {
                 onClick={() => setActiveTab('friends')}
                 className={`px-6 py-3 text-sm font-medium ${
                   activeTab === 'friends'
-                    ? 'border-b-2 border-lime-500 text-lime-600'
+                    ? 'border-b-2 border-custom-green-500 text-custom-green-600'
                     : 'text-gray-500 hover:text-gray-700'
                 }`}
               >
@@ -252,11 +252,11 @@ export default function DashboardClient() {
                     value={newRelay}
                     onChange={(e) => setNewRelay(e.target.value)}
                     placeholder="wss://relay.example.com"
-                    className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-lime-500"
+                    className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-custom-green-500"
                   />
                   <button
                     type="submit"
-                    className="px-4 py-2 bg-lime-500 text-white rounded-lg hover:bg-lime-600"
+                    className="px-4 py-2 bg-custom-green-500 text-white rounded-lg hover:bg-custom-green-600"
                   >
                     Add Relay
                   </button>
@@ -366,8 +366,8 @@ export default function DashboardClient() {
                     <button
                       onClick={handleCreateMatch}
                       disabled={isCreatingMatch}
-                      className={`px-4 py-2 bg-lime-500 text-white rounded-lg ${
-                        isCreatingMatch ? 'opacity-50 cursor-not-allowed' : 'hover:bg-lime-600'
+                      className={`px-4 py-2 bg-custom-green-500 text-white rounded-lg ${
+                        isCreatingMatch ? 'opacity-50 cursor-not-allowed' : 'hover:bg-custom-green-600'
                       } flex items-center gap-2`}
                     >
                       {isCreatingMatch ? (
@@ -389,7 +389,7 @@ export default function DashboardClient() {
                     <div
                       key={friend.pubkey}
                       className={`p-4 border rounded-lg transition-colors flex justify-between items-center ${
-                        selectedFriends.includes(friend.pubkey) ? 'border-lime-500 bg-lime-50' : 'hover:border-gray-300'
+                        selectedFriends.includes(friend.pubkey) ? 'border-custom-green-500 bg-custom-green-50' : 'hover:border-gray-300'
                       }`}
                     >
                       <div className="flex items-center flex-grow">
@@ -408,7 +408,7 @@ export default function DashboardClient() {
                       <div className="flex gap-2">
                         <button
                           onClick={() => router.push(`/messages?pubkey=${friend.pubkey}`)}
-                          className="px-4 py-2 bg-lime-500 text-white rounded-lg hover:bg-lime-600"
+                          className="px-4 py-2 bg-custom-green-500 text-white rounded-lg hover:bg-custom-green-600"
                         >
                           Chat
                         </button>
@@ -420,7 +420,7 @@ export default function DashboardClient() {
                           className={`px-4 py-2 rounded-lg border ${
                             selectedFriends.includes(friend.pubkey)
                               ? 'bg-rose-500 text-white hover:bg-rose-600 border-transparent'
-                              : 'border-lime-500 text-lime-500 hover:bg-lime-50'
+                              : 'border-custom-green-500 text-custom-green-500 hover:bg-custom-green-50'
                           }`}
                         >
                           {selectedFriends.includes(friend.pubkey) ? 'Unselect' : 'Match'}

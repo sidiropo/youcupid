@@ -160,7 +160,7 @@ export default function MessagesClient() {
               <div
                 className={`max-w-[70%] p-3 rounded-lg ${
                   message.pubkey === publicKey
-                    ? 'bg-lime-500 text-white'
+                    ? 'bg-custom-green-500 text-white'
                     : 'bg-white text-gray-800'
                 }`}
               >
@@ -168,7 +168,7 @@ export default function MessagesClient() {
                 <p
                   className={`text-xs mt-1 ${
                     message.pubkey === publicKey
-                      ? 'text-lime-100'
+                      ? 'text-custom-green-100'
                       : 'text-gray-500'
                   }`}
                 >
@@ -192,11 +192,11 @@ export default function MessagesClient() {
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
             placeholder="Type your message..."
-            className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-lime-500"
+            className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-custom-green-500"
           />
           <button
             type="submit"
-            className="px-6 py-2 bg-lime-500 text-white rounded-lg hover:bg-lime-600 disabled:opacity-50"
+            className="px-6 py-2 bg-custom-green-500 text-white rounded-lg hover:bg-custom-green-600 disabled:opacity-50"
             disabled={!newMessage.trim()}
           >
             Send
