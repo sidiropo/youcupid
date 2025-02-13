@@ -2,15 +2,31 @@
 
 import { useNostr } from '@/lib/nostr/NostrContext';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { useEffect, useState } from 'react';
-import { NDKUser, NDKEvent } from '@nostr-dev-kit/ndk';
+
+interface SimplifiedNDKUser {
+  pubkey: string;
+  profile?: {
+    name?: string;
+    picture?: string;
+  };
+}
+
+interface SimplifiedNDKEvent {
+  id: string;
+  content: string;
+  created_at?: number;
+  pubkey: string;
+  tags: string[][];
+}
 
 export default function DashboardClient() {
   const { user, publicKey, relays, addRelay, removeRelay, getFriends, getMatches, getMatchesInvolvingMe, logout, createMatch } = useNostr();
   const router = useRouter();
-  const [friends, setFriends] = useState<NDKUser[]>([]);
-  const [matches, setMatches] = useState<NDKEvent[]>([]);
-  const [matchesInvolvingMe, setMatchesInvolvingMe] = useState<NDKEvent[]>([]);
+  const [friends, setFriends] = useState<SimplifiedNDKUser[]>([]);
+  const [matches, setMatches] = useState<SimplifiedNDKEvent[]>([]);
+  const [matchesInvolvingMe, setMatchesInvolvingMe] = useState<SimplifiedNDKEvent[]>([]);
   const [newRelay, setNewRelay] = useState('');
   const [loading, setLoading] = useState(true);
   const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
@@ -26,24 +42,38 @@ export default function DashboardClient() {
     const loadData = async () => {
       try {
         // Load each piece of data independently to avoid Promise.all failing everything
-        let friendsData: NDKUser[] = [];
-        let matchesData: NDKEvent[] = [];
-        let matchesInvolvingMeData: NDKEvent[] = [];
+        let friendsData: SimplifiedNDKUser[] = [];
+        let matchesData: SimplifiedNDKEvent[] = [];
+        let matchesInvolvingMeData: SimplifiedNDKEvent[] = [];
 
         try {
-          friendsData = await getFriends();
+          friendsData = await getFriends() as SimplifiedNDKUser[];
         } catch (error) {
           console.error('Error loading friends:', error);
         }
 
         try {
-          matchesData = await getMatches();
+          const rawMatchesData = await getMatches();
+          matchesData = rawMatchesData.map(match => ({
+            id: match.id,
+            content: match.content,
+            created_at: match.created_at || Math.floor(Date.now() / 1000),
+            pubkey: match.pubkey,
+            tags: match.tags
+          }));
         } catch (error) {
           console.error('Error loading matches:', error);
         }
 
         try {
-          matchesInvolvingMeData = await getMatchesInvolvingMe();
+          const rawMatchesInvolvingMeData = await getMatchesInvolvingMe();
+          matchesInvolvingMeData = rawMatchesInvolvingMeData.map(match => ({
+            id: match.id,
+            content: match.content,
+            created_at: match.created_at || Math.floor(Date.now() / 1000),
+            pubkey: match.pubkey,
+            tags: match.tags
+          }));
         } catch (error) {
           console.error('Error loading matches involving me:', error);
         }
@@ -119,7 +149,16 @@ export default function DashboardClient() {
       <div className="max-w-6xl mx-auto space-y-8">
         {/* Header */}
         <header className="flex justify-between items-center">
-          <h1 className="text-3xl font-bold text-gray-800">YouCupid</h1>
+          <div className="flex items-center gap-2">
+            <Image
+              src="/youcupid.png"
+              alt="YouCupid Logo"
+              width={70}
+              height={70}
+              className="object-contain"
+            />
+            <h1 className="text-3xl font-bold text-gray-800">YouCupid</h1>
+          </div>
           <div className="space-x-4">
             <button
               onClick={() => router.push('/match')}
@@ -245,7 +284,25 @@ export default function DashboardClient() {
                 <div className="space-y-4">
                   {matchesInvolvingMe.map((match) => (
                     <div key={match.id} className="p-4 border rounded-lg">
-                      <p>{match.content}</p>
+                      <div className="flex items-center gap-4">
+                        {match.tags
+                          .filter(tag => tag[0] === 'p')
+                          .map((tag, index) => (
+                            <div key={tag[1]} className="flex items-center gap-2">
+                              <div className="w-12 h-12 rounded-full overflow-hidden flex-shrink-0">
+                                <img
+                                  src={tag[3] || 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y'}
+                                  alt={tag[2] || 'Anonymous'}
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                              <div>
+                                <p className="font-medium">{tag[2] || tag[1].slice(0, 8)}</p>
+                                {index === 0 && <span className="text-gray-500">matched with</span>}
+                              </div>
+                            </div>
+                          ))}
+                      </div>
                       <p className="text-sm text-gray-500 mt-2">
                         Created: {new Date(match.created_at! * 1000).toLocaleString()}
                       </p>
@@ -267,7 +324,25 @@ export default function DashboardClient() {
                 <div className="space-y-4">
                   {matches.map((match) => (
                     <div key={match.id} className="p-4 border rounded-lg">
-                      <p>{match.content}</p>
+                      <div className="flex items-center gap-4">
+                        {match.tags
+                          .filter(tag => tag[0] === 'p')
+                          .map((tag, index) => (
+                            <div key={tag[1]} className="flex items-center gap-2">
+                              <div className="w-12 h-12 rounded-full overflow-hidden flex-shrink-0">
+                                <img
+                                  src={tag[3] || 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y'}
+                                  alt={tag[2] || 'Anonymous'}
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                              <div>
+                                <p className="font-medium">{tag[2] || tag[1].slice(0, 8)}</p>
+                                {index === 0 && <span className="text-gray-500">matched with</span>}
+                              </div>
+                            </div>
+                          ))}
+                      </div>
                       <p className="text-sm text-gray-500 mt-2">
                         Created: {new Date(match.created_at! * 1000).toLocaleString()}
                       </p>
@@ -317,9 +392,18 @@ export default function DashboardClient() {
                         selectedFriends.includes(friend.pubkey) ? 'border-lime-500 bg-lime-50' : 'hover:border-gray-300'
                       }`}
                     >
-                      <div className="flex-grow">
-                        <h3 className="font-semibold">{friend.profile?.name || 'Anonymous'}</h3>
-                        <p className="text-sm text-gray-500 truncate">{friend.pubkey}</p>
+                      <div className="flex items-center flex-grow">
+                        <div className="w-12 h-12 rounded-full overflow-hidden flex-shrink-0 mr-4">
+                          <img
+                            src={friend.profile?.picture || 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y'}
+                            alt={friend.profile?.name || 'Anonymous'}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div>
+                          <h3 className="font-semibold">{friend.profile?.name || 'Anonymous'}</h3>
+                          <p className="text-sm text-gray-500 truncate">{friend.pubkey}</p>
+                        </div>
                       </div>
                       <div className="flex gap-2">
                         <button

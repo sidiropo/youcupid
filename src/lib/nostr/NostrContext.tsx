@@ -27,6 +27,7 @@ interface NDKUser {
   pubkey: string;
   profile?: {
     name?: string;
+    picture?: string;
   };
   fetchProfile(): Promise<void>;
 }
@@ -87,6 +88,14 @@ interface NostrEvent {
   pubkey: string;
 }
 
+interface SimplifiedNDKUser {
+  pubkey: string;
+  profile: {
+    name?: string;
+    picture?: string;
+  };
+}
+
 interface NostrContextType {
   ndk: NDK | null;
   user: NDKUser | null;
@@ -97,7 +106,7 @@ interface NostrContextType {
   logout: () => void;
   addRelay: (relay: string) => Promise<void>;
   removeRelay: (relay: string) => Promise<void>;
-  getFriends: () => Promise<NDKUser[]>;
+  getFriends: () => Promise<SimplifiedNDKUser[]>;
   sendDirectMessage: (recipientPubkey: string, content: string) => Promise<void>;
   createMatch: (friend1: string, friend2: string) => Promise<void>;
   getMatches: () => Promise<NDKEvent[]>;
@@ -186,25 +195,60 @@ export function NostrProvider({ children }: { children: ReactNode }) {
   const getFriends = async () => {
     if (!ndk || !publicKey) return [];
     
-    const filter: NDKFilter = {
-      kinds: [3], // kind 3 is for contacts
-      authors: [publicKey],
-    };
+    try {
+      console.log('Fetching contact list...');
+      // First get the contact list (kind 3)
+      const contactFilter: NDKFilter = {
+        kinds: [3],
+        authors: [publicKey],
+      };
+      const contactEvents = await ndk.fetchEvents(contactFilter);
+      const friends: SimplifiedNDKUser[] = [];
+      
+      for (const event of contactEvents) {
+        const tags = event.tags.filter((tag) => tag[0] === 'p');
+        console.log(`Found ${tags.length} friend tags in contact list`);
+        
+        // Get all friend pubkeys
+        const friendPubkeys = tags.map(tag => tag[1]);
+        
+        if (friendPubkeys.length === 0) continue;
 
-    const events = await ndk.fetchEvents(filter);
-    const friends: NDKUser[] = [];
-    
-    for (const event of events) {
-      const tags = event.tags.filter((tag) => tag[0] === 'p');
-      for (const tag of tags) {
-        const friendPubkey = tag[1];
-        const friendUser = ndk.getUser({ pubkey: friendPubkey });
-        await friendUser.fetchProfile();
-        friends.push(friendUser);
+        // Fetch all friend profiles in one go (kind 0)
+        console.log('Fetching profiles for friends:', friendPubkeys);
+        const profileFilter: NDKFilter = {
+          kinds: [0],
+          authors: friendPubkeys,
+        };
+        
+        const profileEvents = await ndk.fetchEvents(profileFilter);
+        console.log(`Fetched ${profileEvents.size} profile events`);
+
+        // Process each profile event
+        for (const profileEvent of profileEvents) {
+          try {
+            const content = JSON.parse(profileEvent.content);
+            console.log('Profile content for', profileEvent.pubkey, ':', content);
+            
+            friends.push({
+              pubkey: profileEvent.pubkey,
+              profile: {
+                name: content.name,
+                picture: content.picture
+              }
+            });
+          } catch (error) {
+            console.error(`Failed to parse profile for ${profileEvent.pubkey}:`, error);
+          }
+        }
       }
-    }
 
-    return friends;
+      console.log('Final friends list:', friends);
+      return friends;
+    } catch (error) {
+      console.error('Error in getFriends:', error);
+      return [];
+    }
   };
 
   const sendDirectMessage = async (recipientPubkey: string, content: string) => {
@@ -341,29 +385,60 @@ export function NostrProvider({ children }: { children: ReactNode }) {
 
     const events = await ndk.fetchEvents(filter);
     const matches = Array.from(events);
+    const allPubkeys = new Set<string>();
 
-    // Fetch user profiles for each match if needed
+    // Collect all pubkeys from matches
+    for (const match of matches) {
+      const friendTags = match.tags.filter(tag => tag[0] === 'p');
+      friendTags.forEach(tag => allPubkeys.add(tag[1]));
+    }
+
+    // Fetch all profiles in one go
+    const profileFilter: NDKFilter = {
+      kinds: [0],
+      authors: Array.from(allPubkeys),
+    };
+    
+    const profileEvents = await ndk.fetchEvents(profileFilter);
+    const profiles = new Map<string, { name: string; picture?: string }>();
+
+    // Build a map of profiles
+    for (const profileEvent of profileEvents) {
+      try {
+        const content = JSON.parse(profileEvent.content);
+        profiles.set(profileEvent.pubkey, {
+          name: content.name || profileEvent.pubkey.slice(0, 8),
+          picture: content.picture
+        });
+      } catch (error) {
+        console.warn('Failed to parse profile:', error);
+      }
+    }
+
+    // Update match content with profile information
     for (const match of matches) {
       const friend1Tag = match.tags.find(tag => tag[0] === 'p' && tag[1]);
       const friend2Tag = match.tags.find(tag => tag[1] !== friend1Tag?.[1] && tag[0] === 'p');
 
       if (friend1Tag && friend2Tag) {
-        const friend1User = ndk.getUser({ pubkey: friend1Tag[1] });
-        const friend2User = ndk.getUser({ pubkey: friend2Tag[1] });
-        
-        try {
-          await Promise.all([
-            friend1User.fetchProfile(),
-            friend2User.fetchProfile(),
-          ]);
+        const friend1Profile = profiles.get(friend1Tag[1]);
+        const friend2Profile = profiles.get(friend2Tag[1]);
 
-          // Update the match content with user names
-          const friend1Name = friend1User.profile?.name || friend1Tag[1].slice(0, 8);
-          const friend2Name = friend2User.profile?.name || friend2Tag[1].slice(0, 8);
-          match.content = `Match created between ${friend1Name} and ${friend2Name}!`;
-        } catch (error) {
-          console.warn('Failed to fetch user profiles for match:', error);
-        }
+        // Add profile information to tags
+        match.tags = match.tags.map(tag => {
+          if (tag[0] === 'p') {
+            const profile = profiles.get(tag[1]);
+            if (profile) {
+              return [...tag, profile.name, profile.picture || ''];
+            }
+          }
+          return tag;
+        });
+
+        // Update content with names
+        const friend1Name = friend1Profile?.name || friend1Tag[1].slice(0, 8);
+        const friend2Name = friend2Profile?.name || friend2Tag[1].slice(0, 8);
+        match.content = `Match created between ${friend1Name} and ${friend2Name}!`;
       }
     }
 
@@ -376,34 +451,65 @@ export function NostrProvider({ children }: { children: ReactNode }) {
     const filter: NDKFilter = {
       kinds: [1],
       '#t': ['youcupid-match'],
-      '#p': [publicKey], // Look for matches involving the current user
+      '#p': [publicKey],
     };
 
     const events = await ndk.fetchEvents(filter);
     const matches = Array.from(events).filter(event => event.pubkey !== publicKey);
+    const allPubkeys = new Set<string>();
 
-    // Fetch user profiles for each match if needed
+    // Collect all pubkeys from matches
+    for (const match of matches) {
+      const friendTags = match.tags.filter(tag => tag[0] === 'p');
+      friendTags.forEach(tag => allPubkeys.add(tag[1]));
+    }
+
+    // Fetch all profiles in one go
+    const profileFilter: NDKFilter = {
+      kinds: [0],
+      authors: Array.from(allPubkeys),
+    };
+    
+    const profileEvents = await ndk.fetchEvents(profileFilter);
+    const profiles = new Map<string, { name: string; picture?: string }>();
+
+    // Build a map of profiles
+    for (const profileEvent of profileEvents) {
+      try {
+        const content = JSON.parse(profileEvent.content);
+        profiles.set(profileEvent.pubkey, {
+          name: content.name || profileEvent.pubkey.slice(0, 8),
+          picture: content.picture
+        });
+      } catch (error) {
+        console.warn('Failed to parse profile:', error);
+      }
+    }
+
+    // Update match content with profile information
     for (const match of matches) {
       const friend1Tag = match.tags.find(tag => tag[0] === 'p' && tag[1]);
       const friend2Tag = match.tags.find(tag => tag[1] !== friend1Tag?.[1] && tag[0] === 'p');
 
       if (friend1Tag && friend2Tag) {
-        const friend1User = ndk.getUser({ pubkey: friend1Tag[1] });
-        const friend2User = ndk.getUser({ pubkey: friend2Tag[1] });
-        
-        try {
-          await Promise.all([
-            friend1User.fetchProfile(),
-            friend2User.fetchProfile(),
-          ]);
+        const friend1Profile = profiles.get(friend1Tag[1]);
+        const friend2Profile = profiles.get(friend2Tag[1]);
 
-          // Update the match content with user names
-          const friend1Name = friend1User.profile?.name || friend1Tag[1].slice(0, 8);
-          const friend2Name = friend2User.profile?.name || friend2Tag[1].slice(0, 8);
-          match.content = `Match created between ${friend1Name} and ${friend2Name}!`;
-        } catch (error) {
-          console.warn('Failed to fetch user profiles for match:', error);
-        }
+        // Add profile information to tags
+        match.tags = match.tags.map(tag => {
+          if (tag[0] === 'p') {
+            const profile = profiles.get(tag[1]);
+            if (profile) {
+              return [...tag, profile.name, profile.picture || ''];
+            }
+          }
+          return tag;
+        });
+
+        // Update content with names
+        const friend1Name = friend1Profile?.name || friend1Tag[1].slice(0, 8);
+        const friend2Name = friend2Profile?.name || friend2Tag[1].slice(0, 8);
+        match.content = `Match created between ${friend1Name} and ${friend2Name}!`;
       }
     }
 
