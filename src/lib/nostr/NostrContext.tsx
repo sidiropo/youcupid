@@ -111,6 +111,7 @@ interface NostrContextType {
   createMatch: (friend1: string, friend2: string) => Promise<void>;
   getMatches: () => Promise<NDKEvent[]>;
   getMatchesInvolvingMe: () => Promise<NDKEvent[]>;
+  updateProfile: (profile: { name?: string; picture?: string; about?: string }) => Promise<void>;
 }
 
 const NostrContext = createContext<NostrContextType | undefined>(undefined);
@@ -516,6 +517,44 @@ export function NostrProvider({ children }: { children: ReactNode }) {
     return matches;
   };
 
+  const updateProfile = async (profile: { name?: string; picture?: string; about?: string }) => {
+    if (!ndk || !publicKey || !window.nostr) {
+      throw new Error('Missing required nostr components');
+    }
+
+    try {
+      // Create a raw nostr event for profile update (kind 0)
+      const eventData: Partial<NostrEvent> = {
+        kind: 0,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [],
+        content: JSON.stringify(profile),
+        pubkey: publicKey,
+      };
+
+      // Sign the event using the extension
+      const signedEvent = await window.nostr.signEvent(eventData as NostrEvent);
+
+      // Create NDK event
+      const NDKModule = await import('@nostr-dev-kit/ndk');
+      const event = new NDKModule.NDKEvent(ndk, eventData as NostrEvent);
+      event.sig = signedEvent.sig;
+
+      // Calculate event ID and publish
+      await event.toNostrEvent();
+      await event.publish();
+
+      // Update local user state
+      if (user) {
+        user.profile = { ...user.profile, ...profile };
+        setUser({ ...user });
+      }
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      throw error;
+    }
+  };
+
   return (
     <NostrContext.Provider
       value={{
@@ -533,6 +572,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
         createMatch,
         getMatches,
         getMatchesInvolvingMe,
+        updateProfile,
       }}
     >
       {children}

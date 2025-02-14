@@ -22,7 +22,7 @@ interface SimplifiedNDKEvent {
 }
 
 export default function DashboardClient() {
-  const { user, publicKey, relays, addRelay, removeRelay, getFriends, getMatches, getMatchesInvolvingMe, logout, createMatch } = useNostr();
+  const { user, publicKey, relays, addRelay, removeRelay, getFriends, getMatches, getMatchesInvolvingMe, logout, createMatch, updateProfile } = useNostr();
   const router = useRouter();
   const [friends, setFriends] = useState<SimplifiedNDKUser[]>([]);
   const [matches, setMatches] = useState<SimplifiedNDKEvent[]>([]);
@@ -32,6 +32,13 @@ export default function DashboardClient() {
   const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState('profile');
   const [isCreatingMatch, setIsCreatingMatch] = useState(false);
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [profileForm, setProfileForm] = useState({
+    name: user?.profile?.name || '',
+    about: '',
+    picture: user?.profile?.picture || '',
+  });
+  const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
 
   useEffect(() => {
     if (!user) {
@@ -157,7 +164,7 @@ export default function DashboardClient() {
               height={70}
               className="object-contain"
             />
-            <h1 className="text-3xl font-bold text-gray-800">YouCupid</h1>
+            <h1 className="text-3xl font-bold text-[#B71C5D]">YouCupid</h1>
           </div>
           <div className="space-x-4">
             <button
@@ -168,7 +175,7 @@ export default function DashboardClient() {
             </button>
             <button
               onClick={handleLogout}
-              className="px-4 py-2 bg-rose-500 text-white rounded-lg hover:bg-rose-600"
+              className="px-4 py-2 bg-[#B71C5D] text-white rounded-lg hover:bg-[#9D1850]"
             >
               Logout
             </button>
@@ -184,7 +191,7 @@ export default function DashboardClient() {
                 className={`px-6 py-3 text-sm font-medium ${
                   activeTab === 'profile'
                     ? 'border-b-2 border-custom-green-500 text-custom-green-600'
-                    : 'text-gray-500 hover:text-gray-700'
+                    : 'text-gray-700 hover:text-gray-900'
                 }`}
               >
                 Your Profile
@@ -194,7 +201,7 @@ export default function DashboardClient() {
                 className={`px-6 py-3 text-sm font-medium ${
                   activeTab === 'relays'
                     ? 'border-b-2 border-custom-green-500 text-custom-green-600'
-                    : 'text-gray-500 hover:text-gray-700'
+                    : 'text-gray-700 hover:text-gray-900'
                 }`}
               >
                 Manage Relays
@@ -204,7 +211,7 @@ export default function DashboardClient() {
                 className={`px-6 py-3 text-sm font-medium ${
                   activeTab === 'matches'
                     ? 'border-b-2 border-custom-green-500 text-custom-green-600'
-                    : 'text-gray-500 hover:text-gray-700'
+                    : 'text-gray-700 hover:text-gray-900'
                 }`}
               >
                 Matches
@@ -214,7 +221,7 @@ export default function DashboardClient() {
                 className={`px-6 py-3 text-sm font-medium ${
                   activeTab === 'created-matches'
                     ? 'border-b-2 border-custom-green-500 text-custom-green-600'
-                    : 'text-gray-500 hover:text-gray-700'
+                    : 'text-gray-700 hover:text-gray-900'
                 }`}
               >
                 Your Created Matches
@@ -224,7 +231,7 @@ export default function DashboardClient() {
                 className={`px-6 py-3 text-sm font-medium ${
                   activeTab === 'friends'
                     ? 'border-b-2 border-custom-green-500 text-custom-green-600'
-                    : 'text-gray-500 hover:text-gray-700'
+                    : 'text-gray-700 hover:text-gray-900'
                 }`}
               >
                 Your Friends
@@ -235,24 +242,144 @@ export default function DashboardClient() {
           <div className="p-6">
             {/* Profile Tab */}
             {activeTab === 'profile' && (
-              <div>
-                <h2 className="text-xl font-semibold mb-4">Your Profile</h2>
-                <p className="text-gray-600">Public Key: {publicKey}</p>
-                <p className="text-gray-600">Name: {user?.profile?.name || 'Not set'}</p>
+              <div className="max-w-2xl mx-auto">
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className="text-xl font-semibold text-gray-900">Your Profile</h2>
+                  <button
+                    onClick={() => setIsEditingProfile(!isEditingProfile)}
+                    className="px-4 py-2 text-sm bg-custom-green-500 text-white rounded-lg hover:bg-custom-green-600"
+                  >
+                    {isEditingProfile ? 'Cancel' : 'Edit Profile'}
+                  </button>
+                </div>
+
+                {isEditingProfile ? (
+                  <form onSubmit={async (e) => {
+                    e.preventDefault();
+                    try {
+                      setIsUpdatingProfile(true);
+                      await updateProfile(profileForm);
+                      setIsEditingProfile(false);
+                    } catch (error) {
+                      console.error('Failed to update profile:', error);
+                      alert('Failed to update profile. Please try again.');
+                    } finally {
+                      setIsUpdatingProfile(false);
+                    }
+                  }} className="space-y-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-900 mb-1">
+                        Profile Picture URL
+                      </label>
+                      <input
+                        type="url"
+                        value={profileForm.picture}
+                        onChange={(e) => setProfileForm({ ...profileForm, picture: e.target.value })}
+                        placeholder="https://example.com/your-photo.jpg"
+                        className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-custom-green-500 text-gray-900 placeholder-gray-500"
+                      />
+                      {profileForm.picture && (
+                        <div className="mt-2">
+                          <img
+                            src={profileForm.picture}
+                            alt="Profile Preview"
+                            className="w-32 h-32 object-cover rounded-lg"
+                            onError={(e) => {
+                              e.currentTarget.src = 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y';
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-900 mb-1">
+                        Name
+                      </label>
+                      <input
+                        type="text"
+                        value={profileForm.name}
+                        onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
+                        placeholder="Your name"
+                        className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-custom-green-500 text-gray-900 placeholder-gray-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-900 mb-1">
+                        About
+                      </label>
+                      <textarea
+                        value={profileForm.about}
+                        onChange={(e) => setProfileForm({ ...profileForm, about: e.target.value })}
+                        placeholder="Tell us about yourself..."
+                        rows={4}
+                        className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-custom-green-500 text-gray-900 placeholder-gray-500"
+                      />
+                    </div>
+
+                    <div className="flex justify-end gap-4">
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingProfile(false)}
+                        className="px-4 py-2 text-sm text-gray-700 hover:text-gray-900"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isUpdatingProfile}
+                        className={`px-4 py-2 text-sm bg-custom-green-500 text-white rounded-lg hover:bg-custom-green-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2`}
+                      >
+                        {isUpdatingProfile ? (
+                          <>
+                            <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Saving...
+                          </>
+                        ) : (
+                          'Save Changes'
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="space-y-6">
+                    <div className="flex items-start gap-6">
+                      <img
+                        src={user?.profile?.picture || 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y'}
+                        alt={user?.profile?.name || 'Profile'}
+                        className="w-32 h-32 object-cover rounded-lg"
+                        onError={(e) => {
+                          e.currentTarget.src = 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y';
+                        }}
+                      />
+                      <div>
+                        <h3 className="text-lg font-medium text-gray-900">{user?.profile?.name || 'Anonymous'}</h3>
+                        <p className="text-sm text-gray-600 break-all mt-1">{publicKey}</p>
+                        {profileForm.about && (
+                          <p className="text-gray-700 mt-4">{profileForm.about}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
             {/* Relays Tab */}
             {activeTab === 'relays' && (
               <div>
-                <h2 className="text-xl font-semibold mb-4">Manage Relays</h2>
+                <h2 className="text-xl font-semibold text-gray-900 mb-4">Manage Relays</h2>
                 <form onSubmit={handleAddRelay} className="flex gap-2 mb-4">
                   <input
                     type="text"
                     value={newRelay}
                     onChange={(e) => setNewRelay(e.target.value)}
                     placeholder="wss://relay.example.com"
-                    className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-custom-green-500"
+                    className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-custom-green-500 text-gray-900 placeholder-gray-500"
                   />
                   <button
                     type="submit"
@@ -264,7 +391,7 @@ export default function DashboardClient() {
                 <ul className="space-y-2">
                   {relays.map((relay) => (
                     <li key={relay} className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
-                      <span>{relay}</span>
+                      <span className="text-gray-900">{relay}</span>
                       <button
                         onClick={() => removeRelay(relay)}
                         className="text-rose-500 hover:text-rose-600"
@@ -280,7 +407,7 @@ export default function DashboardClient() {
             {/* Matches Tab */}
             {activeTab === 'matches' && (
               <div>
-                <h2 className="text-xl font-semibold mb-4">Matches</h2>
+                <h2 className="text-xl font-semibold text-gray-900 mb-4">Matches</h2>
                 <div className="space-y-4">
                   {matchesInvolvingMe.map((match) => (
                     <div key={match.id} className="p-4 border rounded-lg">
@@ -297,19 +424,19 @@ export default function DashboardClient() {
                                 />
                               </div>
                               <div>
-                                <p className="font-medium">{tag[2] || tag[1].slice(0, 8)}</p>
-                                {index === 0 && <span className="text-gray-500">matched with</span>}
+                                <p className="font-medium text-gray-900">{tag[2] || tag[1].slice(0, 8)}</p>
+                                {index === 0 && <span className="text-gray-700">matched with</span>}
                               </div>
                             </div>
                           ))}
                       </div>
-                      <p className="text-sm text-gray-500 mt-2">
+                      <p className="text-sm text-gray-700 mt-2">
                         Created: {new Date(match.created_at! * 1000).toLocaleString()}
                       </p>
                     </div>
                   ))}
                   {matchesInvolvingMe.length === 0 && (
-                    <p className="text-gray-500 text-center py-4">
+                    <p className="text-gray-700 text-center py-4">
                       No matches involving you yet. Ask your friends to match you with someone!
                     </p>
                   )}
@@ -320,7 +447,7 @@ export default function DashboardClient() {
             {/* Created Matches Tab */}
             {activeTab === 'created-matches' && (
               <div>
-                <h2 className="text-xl font-semibold mb-4">Your Created Matches</h2>
+                <h2 className="text-xl font-semibold text-gray-900 mb-4">Your Created Matches</h2>
                 <div className="space-y-4">
                   {matches.map((match) => (
                     <div key={match.id} className="p-4 border rounded-lg">
@@ -337,19 +464,19 @@ export default function DashboardClient() {
                                 />
                               </div>
                               <div>
-                                <p className="font-medium">{tag[2] || tag[1].slice(0, 8)}</p>
-                                {index === 0 && <span className="text-gray-500">matched with</span>}
+                                <p className="font-medium text-gray-900">{tag[2] || tag[1].slice(0, 8)}</p>
+                                {index === 0 && <span className="text-gray-700">matched with</span>}
                               </div>
                             </div>
                           ))}
                       </div>
-                      <p className="text-sm text-gray-500 mt-2">
+                      <p className="text-sm text-gray-700 mt-2">
                         Created: {new Date(match.created_at! * 1000).toLocaleString()}
                       </p>
                     </div>
                   ))}
                   {matches.length === 0 && (
-                    <p className="text-gray-500 text-center py-4">
+                    <p className="text-gray-700 text-center py-4">
                       You haven&apos;t created any matches yet. Go to the Create Match page to match your friends!
                     </p>
                   )}
@@ -361,7 +488,7 @@ export default function DashboardClient() {
             {activeTab === 'friends' && (
               <div>
                 <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-xl font-semibold">Your Friends</h2>
+                  <h2 className="text-xl font-semibold text-gray-900">Your Friends</h2>
                   {selectedFriends.length === 2 && (
                     <button
                       onClick={handleCreateMatch}
@@ -401,8 +528,8 @@ export default function DashboardClient() {
                           />
                         </div>
                         <div>
-                          <h3 className="font-semibold">{friend.profile?.name || 'Anonymous'}</h3>
-                          <p className="text-sm text-gray-500 truncate">{friend.pubkey}</p>
+                          <h3 className="font-semibold text-gray-900">{friend.profile?.name || 'Anonymous'}</h3>
+                          <p className="text-sm text-gray-700 truncate">{friend.pubkey}</p>
                         </div>
                       </div>
                       <div className="flex gap-2">
@@ -419,7 +546,7 @@ export default function DashboardClient() {
                           }}
                           className={`px-4 py-2 rounded-lg border ${
                             selectedFriends.includes(friend.pubkey)
-                              ? 'bg-rose-500 text-white hover:bg-rose-600 border-transparent'
+                              ? 'bg-[#B71C5D] text-white hover:bg-[#9D1850] border-transparent'
                               : 'border-custom-green-500 text-custom-green-500 hover:bg-custom-green-50'
                           }`}
                         >
@@ -429,7 +556,7 @@ export default function DashboardClient() {
                     </div>
                   ))}
                   {friends.length === 0 && (
-                    <p className="text-gray-500 text-center py-4">
+                    <p className="text-gray-700 text-center py-4">
                       No friends found. Add some friends to get started!
                     </p>
                   )}
