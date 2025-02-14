@@ -270,26 +270,46 @@ export function NostrProvider({ children }: { children: ReactNode }) {
     if (!ndk || !publicKey) return;
     try {
       console.log('Fetching user profile for:', publicKey);
+      console.log('Connected relays:', Array.from(ndk.pool.relays.keys()));
+      
       // First try to get the profile directly from the network
       const profileFilter: NDKFilter = {
         kinds: [0],
         authors: [publicKey],
       };
       
-      const profileEvents = await ndk.fetchEvents(profileFilter);
+      // Set a timeout for the fetch operation
+      const timeoutPromise = new Promise<Set<NDKEvent>>((_, reject) => 
+        setTimeout(() => reject(new Error('Profile fetch timeout')), 5000)
+      );
+      
+      const fetchPromise = ndk.fetchEvents(profileFilter);
+      const profileEvents = await Promise.race([fetchPromise, timeoutPromise]);
+      
       console.log('Found profile events:', profileEvents.size);
       
       // Get the most recent profile event
-      const profileEvent = Array.from(profileEvents).sort((a, b) => (b.created_at || 0) - (a.created_at || 0))[0];
+      const events = Array.from(profileEvents) as NDKEvent[];
+      console.log('All profile events:', events.map(e => ({ 
+        created_at: e.created_at,
+        content: e.content
+      })));
+      
+      const profileEvent = events.sort((a, b) => (b.created_at || 0) - (a.created_at || 0))[0];
       
       if (profileEvent) {
-        console.log('Found profile event:', profileEvent);
+        console.log('Found most recent profile event:', {
+          id: profileEvent.id,
+          created_at: profileEvent.created_at,
+          content: profileEvent.content
+        });
         try {
           const content = JSON.parse(profileEvent.content);
           console.log('Parsed profile content:', content);
           const ndkUser = ndk.getUser({ pubkey: publicKey });
           ndkUser.profile = content;
           setUser(ndkUser);
+          console.log('Updated user state with profile:', ndkUser.profile);
         } catch (parseError) {
           console.error('Failed to parse profile content:', parseError);
         }
@@ -689,6 +709,8 @@ export function NostrProvider({ children }: { children: ReactNode }) {
 
     try {
       console.log('Updating profile with:', profile);
+      console.log('Connected relays:', Array.from(ndk.pool.relays.keys()));
+      
       // Create a raw nostr event for profile update (kind 0)
       const eventData: Partial<NostrEvent> = {
         kind: 0,
@@ -699,7 +721,9 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       };
 
       // Sign the event using the extension
+      console.log('Signing event with extension...');
       const signedEvent = await window.nostr.signEvent(eventData as NostrEvent);
+      console.log('Event signed successfully');
 
       // Create NDK event
       const event = new NDKEvent(ndk, eventData as NostrEvent);
@@ -707,17 +731,29 @@ export function NostrProvider({ children }: { children: ReactNode }) {
 
       // Calculate event ID and publish
       await event.toNostrEvent();
-      await event.publish();
-      console.log('Profile update published successfully');
+      console.log('Publishing event to relays...');
+      const publishPromise = event.publish();
+      
+      // Wait for at least one relay to confirm publication
+      const publishResult = await Promise.race([
+        publishPromise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Publish timeout')), 5000))
+      ]);
+      console.log('Profile update published successfully to relays:', publishResult);
 
       // Update local user state
       if (user) {
+        console.log('Updating local user state...');
         const updatedUser = ndk.getUser({ pubkey: publicKey });
         updatedUser.profile = { ...user.profile, ...profile };
         setUser(updatedUser);
       }
 
+      // Add a small delay before fetching to allow relays to process the update
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       // Fetch the updated profile to ensure we have the latest data
+      console.log('Fetching updated profile to verify...');
       await fetchUserProfile();
     } catch (error) {
       console.error('Error updating profile:', error);
