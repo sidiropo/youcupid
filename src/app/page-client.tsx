@@ -41,7 +41,16 @@ export default function HomeClient() {
             {isLoading ? 'Connecting...' : 'Login with Nostr'}
           </button>
           <p className="text-sm text-gray-500">
-            You need a nostr extension (like nos2x) to use this app
+            You need a nostr extension (like{' '}
+            <a 
+              href="https://chrome.google.com/webstore/detail/nos2x/kpgefcfmnafjgpblomihpgmejjdanjjp"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[#B71C5D] hover:underline"
+            >
+              nos2x
+            </a>
+            ) to use this app
           </p>
         </div>
       </div>
