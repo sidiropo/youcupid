@@ -2,11 +2,17 @@
 
 import { useNostr } from '@/lib/nostr/NostrContext';
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 export default function HomeClient() {
   const { login, user, isLoading } = useNostr();
   const router = useRouter();
+  const [hasNostrExtension, setHasNostrExtension] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    // Check if nostr extension is available
+    setHasNostrExtension(!!window.nostr);
+  }, []);
 
   useEffect(() => {
     if (user) {
@@ -33,13 +39,30 @@ export default function HomeClient() {
           A decentralized dating app powered by nostr
         </p>
         <div className="space-y-4">
-          <button
-            onClick={handleLogin}
-            disabled={isLoading}
-            className="px-6 py-3 bg-gradient-to-r from-[#B71C5D] to-custom-green-500 text-white rounded-lg font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
-          >
-            {isLoading ? 'Connecting...' : 'Login with Nostr'}
-          </button>
+          {hasNostrExtension === false ? (
+            <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-red-600 font-medium mb-2">Nostr Extension Not Found</p>
+              <p className="text-sm text-gray-600 mb-4">
+                To use YouCupid, you need to install a Nostr extension first.
+              </p>
+              <a 
+                href="https://chrome.google.com/webstore/detail/nos2x/kpgefcfmnafjgpblomihpgmejjdanjjp"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+              >
+                Install nos2x Extension
+              </a>
+            </div>
+          ) : (
+            <button
+              onClick={handleLogin}
+              disabled={isLoading}
+              className="px-6 py-3 bg-gradient-to-r from-[#B71C5D] to-custom-green-500 text-white rounded-lg font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              {isLoading ? 'Connecting...' : 'Login with Nostr'}
+            </button>
+          )}
           <p className="text-sm text-gray-500">
             You need a nostr extension (like{' '}
             <a 

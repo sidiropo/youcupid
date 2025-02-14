@@ -193,6 +193,12 @@ export function NostrProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   const initializeNDK = useCallback(async () => {
+    // First check if nostr extension is available
+    if (!window.nostr) {
+      setIsLoading(false);
+      return;
+    }
+
     try {
       // Create a signer that uses the browser extension
       const signer = new BrowserExtensionSigner();
