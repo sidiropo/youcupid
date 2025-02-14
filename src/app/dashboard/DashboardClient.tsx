@@ -356,7 +356,7 @@ export default function DashboardClient() {
         <header className="flex justify-between items-center">
           <div className="flex items-center gap-2">
             <Image
-              src="/youcupid.png"
+              src={process.env.NODE_ENV === 'production' ? '/youcupid/youcupid.png' : '/youcupid.png'}
               alt="YouCupid Logo"
               width={70}
               height={70}
