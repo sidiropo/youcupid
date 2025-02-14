@@ -206,6 +206,14 @@ export function NostrProvider({ children }: { children: ReactNode }) {
     if (!window.nostr) {
       console.log('No nostr extension found during NDK initialization after waiting');
       setIsLoading(false);
+      // Add a listener for when the extension becomes available
+      const checkForExtension = setInterval(() => {
+        if (window.nostr) {
+          console.log('Nostr extension became available, reinitializing NDK...');
+          clearInterval(checkForExtension);
+          initializeNDK();
+        }
+      }, 1000);
       return;
     }
     console.log('Nostr extension found:', window.nostr);
@@ -243,6 +251,8 @@ export function NostrProvider({ children }: { children: ReactNode }) {
         }
       } catch (error) {
         console.error('Failed to connect to relays:', error);
+        // Even if relay connection fails, we still want to keep the NDK instance
+        setNdk(newNdk);
       } finally {
         setIsLoading(false);
       }
