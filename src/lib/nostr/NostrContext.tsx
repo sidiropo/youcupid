@@ -195,8 +195,16 @@ export function NostrProvider({ children }: { children: ReactNode }) {
   const initializeNDK = useCallback(async () => {
     // First check if nostr extension is available
     console.log('Initializing NDK, checking for nostr extension...');
+    
+    // Wait for extension to be available (up to 5 seconds)
+    let attempts = 0;
+    while (!window.nostr && attempts < 50) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      attempts++;
+    }
+
     if (!window.nostr) {
-      console.log('No nostr extension found during NDK initialization');
+      console.log('No nostr extension found during NDK initialization after waiting');
       setIsLoading(false);
       return;
     }
