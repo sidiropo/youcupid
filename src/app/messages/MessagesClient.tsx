@@ -101,7 +101,7 @@ export default function MessagesClient() {
           return (async () => {
             try {
               const decryptedContent = await nostr.nip04!.decrypt(
-                ndkEvent.pubkey === publicKey ? pubkey : publicKey,
+                ndkEvent.pubkey === publicKey ? pubkey : ndkEvent.pubkey,
                 ndkEvent.content
               );
 
@@ -183,7 +183,7 @@ export default function MessagesClient() {
         if (!nostr?.nip04) return;
 
         const decryptedContent = await nostr.nip04.decrypt(
-          event.pubkey === publicKey ? pubkey : publicKey,
+          event.pubkey === publicKey ? pubkey : event.pubkey,
           event.content
         );
 
