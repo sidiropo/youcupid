@@ -4,6 +4,16 @@ import { useNostr } from '@/lib/nostr/NostrContext';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
+import { NDKEvent } from '@nostr-dev-kit/ndk';
+import defaultAvatar from '@/assets/default-avatar.png';
+
+interface SimplifiedNDKEvent {
+  id: string;
+  content: string;
+  created_at: number;
+  pubkey: string;
+  tags: string[][];
+}
 
 interface SimplifiedNDKUser {
   pubkey: string;
@@ -13,32 +23,149 @@ interface SimplifiedNDKUser {
   };
 }
 
-interface SimplifiedNDKEvent {
-  id: string;
-  content: string;
-  created_at?: number;
+interface ActiveChat {
   pubkey: string;
+  lastMessage: {
+    content: string;
+    created_at: number;
+  };
+  profile: {
+    name: string;
+    picture: string;
+  };
+}
+
+interface NDKEventWithTags extends NDKEvent {
   tags: string[][];
 }
 
 export default function DashboardClient() {
-  const { user, publicKey, relays, addRelay, removeRelay, getFriends, getMatches, getMatchesInvolvingMe, logout, createMatch, updateProfile } = useNostr();
+  const { user, publicKey, relays, ndk, addRelay, removeRelay, getFriends, getMatches, getMatchesInvolvingMe, logout, createMatch, updateProfile, addFriend } = useNostr();
   const router = useRouter();
   const [friends, setFriends] = useState<SimplifiedNDKUser[]>([]);
   const [matches, setMatches] = useState<SimplifiedNDKEvent[]>([]);
   const [matchesInvolvingMe, setMatchesInvolvingMe] = useState<SimplifiedNDKEvent[]>([]);
+  const [activeChats, setActiveChats] = useState<ActiveChat[]>([]);
   const [newRelay, setNewRelay] = useState('');
   const [loading, setLoading] = useState(true);
   const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState('profile');
   const [isCreatingMatch, setIsCreatingMatch] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
-  const [profileForm, setProfileForm] = useState({
+  const [isAddingFriend, setIsAddingFriend] = useState(false);
+  const [newFriendPubkey, setNewFriendPubkey] = useState('');
+  const [addFriendError, setAddFriendError] = useState('');
+  const [isAddingFriendLoading, setIsAddingFriendLoading] = useState(false);
+  const [profileForm, setProfileForm] = useState<{
+    name: string;
+    about: string;
+    picture: string;
+  }>({
     name: user?.profile?.name || '',
     about: '',
-    picture: user?.profile?.picture || '',
+    picture: typeof user?.profile?.picture === 'string' ? user.profile.picture : '',
   });
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
+
+  // Update profileForm when user changes
+  useEffect(() => {
+    if (user?.profile) {
+      setProfileForm({
+        name: user.profile.name || '',
+        about: (user.profile.about as string) || '',
+        picture: typeof user.profile.picture === 'string' ? user.profile.picture : '',
+      });
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || !ndk || !publicKey) {
+      return;
+    }
+
+    // Load active chats
+    const loadActiveChats = async () => {
+      try {
+        const filter = {
+          kinds: [4], // kind 4 is for encrypted direct messages
+          authors: [publicKey],
+          limit: 100,
+        };
+
+        const events = await ndk.fetchEvents(filter);
+        const chatMap = new Map<string, { content: string; created_at: number }>();
+        
+        // Process events to get the latest message for each chat
+        for (const event of Array.from(events)) {
+          const ndkEvent = event as NDKEventWithTags;
+          const recipient = ndkEvent.tags.find((tag: string[]) => tag[0] === 'p')?.[1];
+          if (!recipient) continue;
+
+          const existing = chatMap.get(recipient);
+          if (!existing || existing.created_at < ndkEvent.created_at!) {
+            try {
+              const nostr = window.nostr;
+              if (!nostr?.nip04) {
+                throw new Error('NIP-04 encryption not supported by extension');
+              }
+              // Decrypt the message content
+              const decryptedContent = await nostr.nip04.decrypt(recipient, ndkEvent.content);
+              chatMap.set(recipient, {
+                content: decryptedContent,
+                created_at: ndkEvent.created_at!
+              });
+            } catch (error) {
+              console.error('Error decrypting message:', error);
+              chatMap.set(recipient, {
+                content: '(Unable to decrypt message)',
+                created_at: ndkEvent.created_at!
+              });
+            }
+          }
+        }
+
+        const defaultAvatar = 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y';
+
+        // Convert to array and add profile information
+        const chats: ActiveChat[] = await Promise.all(
+          Array.from(chatMap.entries()).map(async ([pubkey, lastMessage]) => {
+            try {
+              const chatPartnerUser = ndk.getUser({ pubkey });
+              const profile = await chatPartnerUser.fetchProfile();
+              const profilePicture = typeof profile?.picture === 'string' ? profile.picture : defaultAvatar;
+              
+              return {
+                pubkey,
+                lastMessage,
+                profile: {
+                  name: profile?.name || pubkey.slice(0, 8),
+                  picture: profilePicture
+                }
+              };
+            } catch (error) {
+              console.error('Error fetching profile for user:', pubkey, error);
+              return {
+                pubkey,
+                lastMessage,
+                profile: {
+                  name: pubkey.slice(0, 8),
+                  picture: defaultAvatar
+                }
+              };
+            }
+          })
+        );
+
+        // Sort by most recent message
+        chats.sort((a, b) => b.lastMessage.created_at - a.lastMessage.created_at);
+        setActiveChats(chats);
+      } catch (error) {
+        console.error('Error loading active chats:', error);
+      }
+    };
+
+    loadActiveChats();
+  }, [ndk, user, publicKey]);
 
   useEffect(() => {
     if (!user) {
@@ -61,12 +188,12 @@ export default function DashboardClient() {
 
         try {
           const rawMatchesData = await getMatches();
-          matchesData = rawMatchesData.map(match => ({
-            id: match.id,
-            content: match.content,
-            created_at: match.created_at || Math.floor(Date.now() / 1000),
-            pubkey: match.pubkey,
-            tags: match.tags
+          matchesData = Array.from(rawMatchesData).map(match => ({
+            id: match.id || '',
+            content: match.content || '',
+            created_at: Math.floor(match.created_at || Date.now() / 1000),
+            pubkey: match.pubkey || '',
+            tags: match.tags.map(tag => tag.map(item => String(item)))
           }));
         } catch (error) {
           console.error('Error loading matches:', error);
@@ -74,12 +201,12 @@ export default function DashboardClient() {
 
         try {
           const rawMatchesInvolvingMeData = await getMatchesInvolvingMe();
-          matchesInvolvingMeData = rawMatchesInvolvingMeData.map(match => ({
-            id: match.id,
-            content: match.content,
-            created_at: match.created_at || Math.floor(Date.now() / 1000),
-            pubkey: match.pubkey,
-            tags: match.tags
+          matchesInvolvingMeData = Array.from(rawMatchesInvolvingMeData).map(match => ({
+            id: match.id || '',
+            content: match.content || '',
+            created_at: Math.floor(match.created_at || Date.now() / 1000),
+            pubkey: match.pubkey || '',
+            tags: match.tags.map(tag => tag.map(item => String(item)))
           }));
         } catch (error) {
           console.error('Error loading matches involving me:', error);
@@ -91,7 +218,6 @@ export default function DashboardClient() {
       } catch (error) {
         console.error('Error in loadData:', error);
       } finally {
-        // Ensure loading is set to false even if there are errors
         setLoading(false);
       }
     };
@@ -132,7 +258,15 @@ export default function DashboardClient() {
       await createMatch(selectedFriends[0], selectedFriends[1]);
       // Refresh matches after creating a new one
       const matchesData = await getMatches();
-      setMatches(matchesData);
+      // Transform NDKEvent[] to SimplifiedNDKEvent[]
+      const simplifiedMatches = Array.from(matchesData).map(event => ({
+        id: event.id || '',
+        content: event.content || '',
+        created_at: Math.floor(event.created_at || Date.now() / 1000),
+        pubkey: event.pubkey || '',
+        tags: event.tags.map(tag => tag.map(item => String(item)))
+      }));
+      setMatches(simplifiedMatches);
       setSelectedFriends([]); // Clear selection after successful match
       alert('Match created successfully!');
     } catch (error) {
@@ -140,6 +274,26 @@ export default function DashboardClient() {
       alert('Failed to create match. Please try again.');
     } finally {
       setIsCreatingMatch(false);
+    }
+  };
+
+  const handleAddFriend = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAddFriendError('');
+    setIsAddingFriendLoading(true);
+    
+    try {
+      await addFriend(newFriendPubkey);
+      // Refresh friends list
+      const friendsData = await getFriends();
+      setFriends(friendsData);
+      // Reset form
+      setNewFriendPubkey('');
+      setIsAddingFriend(false);
+    } catch (error) {
+      setAddFriendError(error instanceof Error ? error.message : 'Failed to add friend');
+    } finally {
+      setIsAddingFriendLoading(false);
     }
   };
 
@@ -157,22 +311,14 @@ export default function DashboardClient() {
         {/* Header */}
         <header className="flex justify-between items-center">
           <div className="flex items-center gap-2">
-            <Image
-              src="/youcupid.png"
+            <img
+              src="/youcupid/youcupid.png"
               alt="YouCupid Logo"
-              width={70}
-              height={70}
-              className="object-contain"
+              className="w-[70px] h-[70px] object-contain"
             />
             <h1 className="text-3xl font-bold text-[#B71C5D]">YouCupid</h1>
           </div>
           <div className="space-x-4">
-            <button
-              onClick={() => router.push('/match')}
-              className="px-4 py-2 bg-custom-green-500 text-white rounded-lg hover:bg-custom-green-600"
-            >
-              Create Match
-            </button>
             <button
               onClick={handleLogout}
               className="px-4 py-2 bg-[#B71C5D] text-white rounded-lg hover:bg-[#9D1850]"
@@ -197,16 +343,6 @@ export default function DashboardClient() {
                 Your Profile
               </button>
               <button
-                onClick={() => setActiveTab('relays')}
-                className={`px-6 py-3 text-sm font-medium ${
-                  activeTab === 'relays'
-                    ? 'border-b-2 border-custom-green-500 text-custom-green-600'
-                    : 'text-gray-700 hover:text-gray-900'
-                }`}
-              >
-                Manage Relays
-              </button>
-              <button
                 onClick={() => setActiveTab('matches')}
                 className={`px-6 py-3 text-sm font-medium ${
                   activeTab === 'matches'
@@ -215,6 +351,16 @@ export default function DashboardClient() {
                 }`}
               >
                 Matches
+              </button>
+              <button
+                onClick={() => setActiveTab('chats')}
+                className={`px-6 py-3 text-sm font-medium ${
+                  activeTab === 'chats'
+                    ? 'border-b-2 border-custom-green-500 text-custom-green-600'
+                    : 'text-gray-700 hover:text-gray-900'
+                }`}
+              >
+                Chats
               </button>
               <button
                 onClick={() => setActiveTab('created-matches')}
@@ -235,6 +381,16 @@ export default function DashboardClient() {
                 }`}
               >
                 Your Friends
+              </button>
+              <button
+                onClick={() => setActiveTab('relays')}
+                className={`px-6 py-3 text-sm font-medium ${
+                  activeTab === 'relays'
+                    ? 'border-b-2 border-custom-green-500 text-custom-green-600'
+                    : 'text-gray-700 hover:text-gray-900'
+                }`}
+              >
+                Manage Relays
               </button>
             </nav>
           </div>
@@ -269,27 +425,49 @@ export default function DashboardClient() {
                   }} className="space-y-6">
                     <div>
                       <label className="block text-sm font-medium text-gray-900 mb-1">
-                        Profile Picture URL
+                        Profile Picture
                       </label>
-                      <input
-                        type="url"
-                        value={profileForm.picture}
-                        onChange={(e) => setProfileForm({ ...profileForm, picture: e.target.value })}
-                        placeholder="https://example.com/your-photo.jpg"
-                        className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-custom-green-500 text-gray-900 placeholder-gray-500"
-                      />
-                      {profileForm.picture && (
-                        <div className="mt-2">
-                          <img
-                            src={profileForm.picture}
-                            alt="Profile Preview"
-                            className="w-32 h-32 object-cover rounded-lg"
-                            onError={(e) => {
-                              e.currentTarget.src = 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y';
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onloadend = () => {
+                                  setProfileForm({ ...profileForm, picture: reader.result as string });
+                                };
+                                reader.readAsDataURL(file);
+                              }
                             }}
+                            className="text-sm text-gray-900 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-custom-green-50 file:text-custom-green-700 hover:file:bg-custom-green-100"
                           />
                         </div>
-                      )}
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-gray-600">or enter an image URL:</span>
+                          <input
+                            type="url"
+                            value={profileForm.picture}
+                            onChange={(e) => setProfileForm({ ...profileForm, picture: e.target.value })}
+                            placeholder="https://example.com/your-photo.jpg"
+                            className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-custom-green-500 text-gray-900 placeholder-gray-500"
+                          />
+                        </div>
+                        {profileForm.picture && (
+                          <div className="mt-2">
+                            <img
+                              src={profileForm.picture}
+                              alt="Profile Preview"
+                              className="w-32 h-32 object-cover rounded-lg"
+                              onError={(e) => {
+                                e.currentTarget.src = 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y';
+                              }}
+                            />
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     <div>
@@ -349,7 +527,7 @@ export default function DashboardClient() {
                   <div className="space-y-6">
                     <div className="flex items-start gap-6">
                       <img
-                        src={user?.profile?.picture || 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y'}
+                        src={typeof user?.profile?.picture === 'string' ? user.profile.picture : 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y'}
                         alt={user?.profile?.name || 'Profile'}
                         className="w-32 h-32 object-cover rounded-lg"
                         onError={(e) => {
@@ -366,41 +544,6 @@ export default function DashboardClient() {
                     </div>
                   </div>
                 )}
-              </div>
-            )}
-
-            {/* Relays Tab */}
-            {activeTab === 'relays' && (
-              <div>
-                <h2 className="text-xl font-semibold text-gray-900 mb-4">Manage Relays</h2>
-                <form onSubmit={handleAddRelay} className="flex gap-2 mb-4">
-                  <input
-                    type="text"
-                    value={newRelay}
-                    onChange={(e) => setNewRelay(e.target.value)}
-                    placeholder="wss://relay.example.com"
-                    className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-custom-green-500 text-gray-900 placeholder-gray-500"
-                  />
-                  <button
-                    type="submit"
-                    className="px-4 py-2 bg-custom-green-500 text-white rounded-lg hover:bg-custom-green-600"
-                  >
-                    Add Relay
-                  </button>
-                </form>
-                <ul className="space-y-2">
-                  {relays.map((relay) => (
-                    <li key={relay} className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
-                      <span className="text-gray-900">{relay}</span>
-                      <button
-                        onClick={() => removeRelay(relay)}
-                        className="text-rose-500 hover:text-rose-600"
-                      >
-                        Remove
-                      </button>
-                    </li>
-                  ))}
-                </ul>
               </div>
             )}
 
@@ -430,15 +573,86 @@ export default function DashboardClient() {
                             </div>
                           ))}
                       </div>
-                      <p className="text-sm text-gray-700 mt-2">
-                        Created: {new Date(match.created_at! * 1000).toLocaleString()}
-                      </p>
+                      <div className="flex justify-between items-center mt-4">
+                        <p className="text-sm text-gray-700">
+                          Created: {new Date(match.created_at * 1000).toLocaleString()}
+                        </p>
+                        <button
+                          onClick={() => {
+                            // Find the other person in the match (not the current user)
+                            const otherPerson = match.tags
+                              .filter(tag => tag[0] === 'p')
+                              .find(tag => tag[1] !== publicKey);
+                            if (otherPerson) {
+                              router.push(`/messages?pubkey=${otherPerson[1]}`);
+                            }
+                          }}
+                          className="px-4 py-2 bg-custom-green-500 text-white rounded-lg hover:bg-custom-green-600"
+                        >
+                          Chat
+                        </button>
+                      </div>
                     </div>
                   ))}
                   {matchesInvolvingMe.length === 0 && (
                     <p className="text-gray-700 text-center py-4">
                       No matches involving you yet. Ask your friends to match you with someone!
                     </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Chats Tab */}
+            {activeTab === 'chats' && (
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900 mb-4">Your Chats</h2>
+                <div className="space-y-4">
+                  {activeChats.map((chat) => (
+                    <div
+                      key={chat.pubkey}
+                      className="p-4 border rounded-lg hover:border-gray-300 transition-colors cursor-pointer"
+                      onClick={() => router.push(`/messages?pubkey=${chat.pubkey}`)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 rounded-full overflow-hidden flex-shrink-0">
+                            <img
+                              src={chat.profile?.picture || 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y'}
+                              alt={chat.profile?.name || 'Anonymous'}
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                          <div>
+                            <h3 className="font-semibold text-gray-900">
+                              {chat.profile?.name || 'Anonymous'}
+                            </h3>
+                            <p className="text-sm text-gray-600 truncate max-w-md">
+                              {chat.lastMessage.content}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              {new Date(chat.lastMessage.created_at * 1000).toLocaleString()}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-custom-green-500">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                          </svg>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {activeChats.length === 0 && (
+                    <div className="text-center py-8">
+                      <p className="text-gray-600 mb-4">No active conversations</p>
+                      <button
+                        onClick={() => setActiveTab('friends')}
+                        className="px-4 py-2 bg-custom-green-500 text-white rounded-lg hover:bg-custom-green-600"
+                      >
+                        Start a Chat
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -471,7 +685,7 @@ export default function DashboardClient() {
                           ))}
                       </div>
                       <p className="text-sm text-gray-700 mt-2">
-                        Created: {new Date(match.created_at! * 1000).toLocaleString()}
+                        Created: {new Date(match.created_at * 1000).toLocaleString()}
                       </p>
                     </div>
                   ))}
@@ -489,27 +703,35 @@ export default function DashboardClient() {
               <div>
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-xl font-semibold text-gray-900">Your Friends</h2>
-                  {selectedFriends.length === 2 && (
+                  <div className="flex gap-2">
                     <button
-                      onClick={handleCreateMatch}
-                      disabled={isCreatingMatch}
-                      className={`px-4 py-2 bg-custom-green-500 text-white rounded-lg ${
-                        isCreatingMatch ? 'opacity-50 cursor-not-allowed' : 'hover:bg-custom-green-600'
-                      } flex items-center gap-2`}
+                      onClick={() => setIsAddingFriend(true)}
+                      className="px-4 py-2 bg-custom-green-500 text-white rounded-lg hover:bg-custom-green-600"
                     >
-                      {isCreatingMatch ? (
-                        <>
-                          <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                          Creating Match...
-                        </>
-                      ) : (
-                        'Match Selected Friends'
-                      )}
+                      Add Friend
                     </button>
-                  )}
+                    {selectedFriends.length === 2 && (
+                      <button
+                        onClick={handleCreateMatch}
+                        disabled={isCreatingMatch}
+                        className={`px-4 py-2 bg-custom-green-500 text-white rounded-lg ${
+                          isCreatingMatch ? 'opacity-50 cursor-not-allowed' : 'hover:bg-custom-green-600'
+                        } flex items-center gap-2`}
+                      >
+                        {isCreatingMatch ? (
+                          <>
+                            <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Creating Match...
+                          </>
+                        ) : (
+                          'Match Selected Friends'
+                        )}
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="space-y-3">
                   {friends.map((friend) => (
@@ -560,6 +782,103 @@ export default function DashboardClient() {
                       No friends found. Add some friends to get started!
                     </p>
                   )}
+                </div>
+              </div>
+            )}
+
+            {/* Relays Tab */}
+            {activeTab === 'relays' && (
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900 mb-4">Manage Relays</h2>
+                <form onSubmit={handleAddRelay} className="flex gap-2 mb-4">
+                  <input
+                    type="text"
+                    value={newRelay}
+                    onChange={(e) => setNewRelay(e.target.value)}
+                    placeholder="wss://relay.example.com"
+                    className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-custom-green-500 text-gray-900 placeholder-gray-500"
+                  />
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-custom-green-500 text-white rounded-lg hover:bg-custom-green-600"
+                  >
+                    Add Relay
+                  </button>
+                </form>
+                <ul className="space-y-2">
+                  {relays.map((relay) => (
+                    <li key={relay} className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
+                      <span className="text-gray-900">{relay}</span>
+                      <button
+                        onClick={() => removeRelay(relay)}
+                        className="text-rose-500 hover:text-rose-600"
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Add Friend Modal */}
+            {isAddingFriend && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                <div className="bg-white rounded-lg p-6 max-w-md w-full">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Add New Friend</h3>
+                  <form onSubmit={handleAddFriend}>
+                    <div className="mb-4">
+                      <label htmlFor="pubkey" className="block text-sm font-medium text-gray-700 mb-1">
+                        Friend's Public Key
+                      </label>
+                      <input
+                        type="text"
+                        id="pubkey"
+                        value={newFriendPubkey}
+                        onChange={(e) => setNewFriendPubkey(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-custom-green-500"
+                        placeholder="npub..."
+                        required
+                      />
+                      {addFriendError && (
+                        <p className="mt-1 text-sm text-red-600">{addFriendError}</p>
+                      )}
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsAddingFriend(false);
+                          setNewFriendPubkey('');
+                          setAddFriendError('');
+                        }}
+                        className="px-4 py-2 text-gray-700 hover:text-gray-900"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isAddingFriendLoading || !newFriendPubkey}
+                        className={`px-4 py-2 bg-custom-green-500 text-white rounded-lg ${
+                          isAddingFriendLoading || !newFriendPubkey
+                            ? 'opacity-50 cursor-not-allowed'
+                            : 'hover:bg-custom-green-600'
+                        } flex items-center gap-2`}
+                      >
+                        {isAddingFriendLoading ? (
+                          <>
+                            <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Adding...
+                          </>
+                        ) : (
+                          'Add Friend'
+                        )}
+                      </button>
+                    </div>
+                  </form>
                 </div>
               </div>
             )}

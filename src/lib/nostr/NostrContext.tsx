@@ -8,48 +8,20 @@ import {
   ReactNode, 
   useCallback 
 } from 'react';
+import NDK, { 
+  NDKUser, 
+  NDKEvent, 
+  NDKFilter, 
+  NDKSigner, 
+  NostrEvent,
+  NDKPrivateKeySigner
+} from '@nostr-dev-kit/ndk';
 
-interface NDKEvent {
-  id: string;
-  kind: number;
-  pubkey: string;
-  content: string;
-  created_at?: number;
-  tags: string[][];
-  sig?: string;
-  encrypt(recipientUser: NDKUser): Promise<void>;
-  sign(): Promise<void>;
-  publish(): Promise<void>;
-  toNostrEvent(): Promise<void>;
-}
-
-interface NDKUser {
-  pubkey: string;
-  profile?: {
-    name?: string;
-    picture?: string;
-  };
-  fetchProfile(): Promise<void>;
-}
-
-interface NDKFilter {
-  kinds?: number[];
-  authors?: string[];
-  '#p'?: string[];
-  '#t'?: string[];
-  ids?: string[];
-  since?: number;
-}
-
-interface NDK {
-  connect(): Promise<void>;
-  fetchEvents(filter: NDKFilter): Promise<Set<NDKEvent>>;
-  fetchEvent(filter: NDKFilter): Promise<NDKEvent | null>;
-  getUser(opts: { pubkey: string }): NDKUser;
-  subscribe(filter: NDKFilter, opts?: { closeOnEose: boolean }): {
-    on(event: string, callback: (event: NDKEvent) => void): void;
-    stop(): void;
-  };
+interface NDKUserProfile {
+  name?: string;
+  picture?: string;
+  about?: string;
+  [key: string]: string | number | undefined;
 }
 
 interface Nip07RelayMap {
@@ -80,14 +52,6 @@ declare global {
   }
 }
 
-interface NostrEvent {
-  kind: number;
-  created_at: number;
-  content: string;
-  tags: string[][];
-  pubkey: string;
-}
-
 interface SimplifiedNDKUser {
   pubkey: string;
   profile: {
@@ -112,48 +76,216 @@ interface NostrContextType {
   getMatches: () => Promise<NDKEvent[]>;
   getMatchesInvolvingMe: () => Promise<NDKEvent[]>;
   updateProfile: (profile: { name?: string; picture?: string; about?: string }) => Promise<void>;
+  addFriend: (friendPubkey: string) => Promise<void>;
 }
 
 const NostrContext = createContext<NostrContextType | undefined>(undefined);
 
+// Custom signer that uses the browser extension
+class BrowserExtensionSigner implements NDKSigner {
+  private pubkey: string | null = null;
+  private ndk: NDK | null = null;
+  private _user: NDKUser | null = null;
+
+  setNDK(ndk: NDK) {
+    this.ndk = ndk;
+  }
+
+  async user(): Promise<NDKUser> {
+    if (!this._user) {
+      await this.blockUntilReady();
+    }
+    if (!this._user) {
+      throw new Error('Failed to initialize user');
+    }
+    return this._user;
+  }
+
+  async blockUntilReady(): Promise<NDKUser> {
+    if (!window.nostr) {
+      throw new Error('Nostr extension not found');
+    }
+    const pubkey = await this.getPublicKey();
+    this._user = new NDKUser({ pubkey });
+    return this._user;
+  }
+
+  async getPublicKey(): Promise<string> {
+    if (!window.nostr) {
+      throw new Error('Nostr extension not found');
+    }
+    if (!this.pubkey) {
+      this.pubkey = await window.nostr.getPublicKey();
+    }
+    return this.pubkey;
+  }
+
+  async sign(event: NostrEvent): Promise<string> {
+    if (!window.nostr) {
+      throw new Error('Nostr extension not found');
+    }
+    const signedEvent = await window.nostr.signEvent({
+      kind: event.kind,
+      tags: event.tags,
+      content: event.content,
+      created_at: event.created_at,
+      pubkey: await this.getPublicKey()
+    });
+    return signedEvent.sig;
+  }
+
+  async encrypt(recipient: NDKUser, value: string): Promise<string> {
+    if (!window.nostr?.nip04) {
+      throw new Error('NIP-04 encryption not supported by extension');
+    }
+    return window.nostr.nip04.encrypt(recipient.pubkey, value);
+  }
+
+  async decrypt(sender: NDKUser, value: string): Promise<string> {
+    if (!window.nostr?.nip04) {
+      throw new Error('NIP-04 encryption not supported by extension');
+    }
+    return window.nostr.nip04.decrypt(sender.pubkey, value);
+  }
+
+  // Implement required NDKSigner interface methods
+  async nip04Encrypt(recipient: NDKUser, value: string): Promise<string> {
+    return this.encrypt(recipient, value);
+  }
+
+  async nip04Decrypt(sender: NDKUser, value: string): Promise<string> {
+    return this.decrypt(sender, value);
+  }
+
+  async nip44Encrypt(recipient: NDKUser, value: string): Promise<string> {
+    if (!window.nostr?.nip44) {
+      throw new Error('NIP-44 encryption not supported by extension');
+    }
+    return window.nostr.nip44.encrypt(recipient.pubkey, value);
+  }
+
+  async nip44Decrypt(sender: NDKUser, value: string): Promise<string> {
+    if (!window.nostr?.nip44) {
+      throw new Error('NIP-44 encryption not supported by extension');
+    }
+    return window.nostr.nip44.decrypt(sender.pubkey, value);
+  }
+}
+
 export function NostrProvider({ children }: { children: ReactNode }) {
   const [ndk, setNdk] = useState<NDK | null>(null);
   const [user, setUser] = useState<NDKUser | null>(null);
-  const [publicKey, setPublicKey] = useState<string | null>(null);
+  const [publicKey, setPublicKey] = useState<string | null>(() => {
+    // Try to restore publicKey from localStorage on initialization
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('nostr_pubkey');
+    }
+    return null;
+  });
   const [relays, setRelays] = useState<string[]>([
-    'wss://purplepag.es',
-    'wss://relay.snort.social',
     'wss://relay.damus.io',
+    'wss://nos.lol',
+    'wss://relay.nostr.band',
     'wss://nostr.wine',
+    'wss://relay.snort.social',
+    'wss://purplepag.es'
   ]);
   const [isLoading, setIsLoading] = useState(true);
 
   const initializeNDK = useCallback(async () => {
     try {
-      const NDKModule = await import('@nostr-dev-kit/ndk');
-      const newNdk = new NDKModule.default({
+      // Create a signer that uses the browser extension
+      const signer = new BrowserExtensionSigner();
+      
+      const newNdk = new NDK({
         explicitRelayUrls: relays,
         enableOutboxModel: true, // This helps with offline/failed relay scenarios
       });
+
+      // Set the signer after NDK instance is created
+      newNdk.signer = signer;
+      signer.setNDK(newNdk);
       
       // Don't wait for connect, just set the NDK instance
       setNdk(newNdk);
       
       // Try to connect in the background
-      newNdk.connect().catch((error) => {
+      try {
+        await newNdk.connect();
+        // After successful connection, fetch profile if we have a publicKey
+        if (publicKey) {
+          const ndkUser = newNdk.getUser({ pubkey: publicKey });
+          await ndkUser.fetchProfile();
+          setUser(ndkUser);
+        }
+      } catch (error) {
         console.warn('Some relays failed to connect:', error);
-        // Continue anyway as we can still function with some failed relays
-      });
+        // Even if some relays fail, try to fetch profile
+        if (publicKey) {
+          try {
+            const ndkUser = newNdk.getUser({ pubkey: publicKey });
+            await ndkUser.fetchProfile();
+            setUser(ndkUser);
+          } catch (profileError) {
+            console.error('Failed to fetch profile after NDK initialization:', profileError);
+          }
+        }
+      }
     } catch (error) {
       console.error('Failed to initialize NDK:', error);
     } finally {
       setIsLoading(false);
     }
-  }, [relays]);
+  }, [relays, publicKey]);
 
   useEffect(() => {
     initializeNDK();
   }, [initializeNDK]);
+
+  const fetchUserProfile = useCallback(async () => {
+    if (!ndk || !publicKey) return;
+    try {
+      console.log('Fetching user profile for:', publicKey);
+      // First try to get the profile directly from the network
+      const profileFilter: NDKFilter = {
+        kinds: [0],
+        authors: [publicKey],
+      };
+      
+      const profileEvents = await ndk.fetchEvents(profileFilter);
+      console.log('Found profile events:', profileEvents.size);
+      
+      // Get the most recent profile event
+      const profileEvent = Array.from(profileEvents).sort((a, b) => (b.created_at || 0) - (a.created_at || 0))[0];
+      
+      if (profileEvent) {
+        console.log('Found profile event:', profileEvent);
+        try {
+          const content = JSON.parse(profileEvent.content);
+          console.log('Parsed profile content:', content);
+          const ndkUser = ndk.getUser({ pubkey: publicKey });
+          ndkUser.profile = content;
+          setUser(ndkUser);
+        } catch (parseError) {
+          console.error('Failed to parse profile content:', parseError);
+        }
+      } else {
+        console.log('No profile event found, creating empty profile');
+        const ndkUser = ndk.getUser({ pubkey: publicKey });
+        setUser(ndkUser);
+      }
+    } catch (error) {
+      console.error('Failed to fetch user profile:', error);
+    }
+  }, [ndk, publicKey]);
+
+  // Only fetch profile when NDK changes or when profile is updated
+  useEffect(() => {
+    if (ndk && publicKey) {
+      console.log('Triggering profile fetch due to NDK or publicKey change');
+      fetchUserProfile();
+    }
+  }, [ndk, publicKey, fetchUserProfile]);
 
   const login = async () => {
     if (!ndk) return;
@@ -165,11 +297,11 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       }
 
       const pubkey = await window.nostr.getPublicKey();
+      // Store publicKey in localStorage
+      localStorage.setItem('nostr_pubkey', pubkey);
       setPublicKey(pubkey);
       
-      const ndkUser = ndk.getUser({ pubkey });
-      await ndkUser.fetchProfile();
-      setUser(ndkUser);
+      // Profile will be fetched by the useEffect hook when publicKey changes
     } catch (error) {
       console.error('Login failed:', error);
       throw error;
@@ -179,6 +311,8 @@ export function NostrProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
+    // Clear publicKey from localStorage on logout
+    localStorage.removeItem('nostr_pubkey');
     setUser(null);
     setPublicKey(null);
   };
@@ -207,11 +341,11 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       const friends: SimplifiedNDKUser[] = [];
       
       for (const event of contactEvents) {
-        const tags = event.tags.filter((tag) => tag[0] === 'p');
+        const tags = event.tags.filter((tag: string[]) => tag[0] === 'p');
         console.log(`Found ${tags.length} friend tags in contact list`);
         
         // Get all friend pubkeys
-        const friendPubkeys = tags.map(tag => tag[1]);
+        const friendPubkeys = tags.map((tag: string[]) => tag[1]);
         
         if (friendPubkeys.length === 0) continue;
 
@@ -385,13 +519,13 @@ export function NostrProvider({ children }: { children: ReactNode }) {
     };
 
     const events = await ndk.fetchEvents(filter);
-    const matches = Array.from(events);
+    const matches = Array.from(events) as NDKEvent[];
     const allPubkeys = new Set<string>();
 
     // Collect all pubkeys from matches
     for (const match of matches) {
-      const friendTags = match.tags.filter(tag => tag[0] === 'p');
-      friendTags.forEach(tag => allPubkeys.add(tag[1]));
+      const friendTags = match.tags.filter((tag: string[]) => tag[0] === 'p');
+      friendTags.forEach((tag: string[]) => allPubkeys.add(tag[1]));
     }
 
     // Fetch all profiles in one go
@@ -523,6 +657,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
     }
 
     try {
+      console.log('Updating profile with:', profile);
       // Create a raw nostr event for profile update (kind 0)
       const eventData: Partial<NostrEvent> = {
         kind: 0,
@@ -536,21 +671,79 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       const signedEvent = await window.nostr.signEvent(eventData as NostrEvent);
 
       // Create NDK event
-      const NDKModule = await import('@nostr-dev-kit/ndk');
-      const event = new NDKModule.NDKEvent(ndk, eventData as NostrEvent);
+      const event = new NDKEvent(ndk, eventData as NostrEvent);
       event.sig = signedEvent.sig;
 
       // Calculate event ID and publish
       await event.toNostrEvent();
       await event.publish();
+      console.log('Profile update published successfully');
 
       // Update local user state
       if (user) {
-        user.profile = { ...user.profile, ...profile };
-        setUser({ ...user });
+        const updatedUser = ndk.getUser({ pubkey: publicKey });
+        updatedUser.profile = { ...user.profile, ...profile };
+        setUser(updatedUser);
       }
+
+      // Fetch the updated profile to ensure we have the latest data
+      await fetchUserProfile();
     } catch (error) {
       console.error('Error updating profile:', error);
+      throw error;
+    }
+  };
+
+  const addFriend = async (friendPubkey: string) => {
+    if (!ndk || !publicKey || !window.nostr) {
+      throw new Error('Missing required nostr components');
+    }
+
+    try {
+      console.log('Adding friend:', friendPubkey);
+      
+      // Get existing contact list
+      const contactFilter: NDKFilter = {
+        kinds: [3],
+        authors: [publicKey],
+      };
+      const existingContacts = await ndk.fetchEvents(contactFilter);
+      const existingContactEvent = Array.from(existingContacts)[0];
+      
+      // Get existing friend tags
+      const existingTags = existingContactEvent ? existingContactEvent.tags : [];
+      const existingFriendTags = existingTags.filter((tag: string[]) => tag[0] === 'p');
+      
+      // Check if friend already exists
+      if (existingFriendTags.some((tag: string[]) => tag[1] === friendPubkey)) {
+        throw new Error('Friend already exists in contact list');
+      }
+      
+      // Create new tags array with the new friend
+      const newTags = [...existingFriendTags, ['p', friendPubkey]];
+      
+      // Create a raw nostr event for contact list update (kind 3)
+      const eventData: Partial<NostrEvent> = {
+        kind: 3,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: newTags,
+        content: '', // Contact list events typically have empty content
+        pubkey: publicKey,
+      };
+
+      // Sign the event using the extension
+      const signedEvent = await window.nostr.signEvent(eventData as NostrEvent);
+
+      // Create NDK event
+      const event = new NDKEvent(ndk, eventData as NostrEvent);
+      event.sig = signedEvent.sig;
+
+      // Calculate event ID and publish
+      await event.toNostrEvent();
+      await event.publish();
+      console.log('Friend added successfully');
+    } catch (error) {
+      console.error('Error adding friend:', error);
       throw error;
     }
   };
@@ -573,6 +766,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
         getMatches,
         getMatchesInvolvingMe,
         updateProfile,
+        addFriend,
       }}
     >
       {children}

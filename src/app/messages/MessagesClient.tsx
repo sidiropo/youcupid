@@ -2,7 +2,7 @@
 
 import { useNostr } from '@/lib/nostr/NostrContext';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { NDKEvent, NDKFilter } from '@nostr-dev-kit/ndk';
 
 interface Message {
@@ -10,6 +10,23 @@ interface Message {
   content: string;
   created_at: number;
   pubkey: string;
+  profile?: {
+    name?: string;
+    picture?: string;
+  };
+}
+
+interface NostrWindow {
+  nostr?: {
+    nip04?: {
+      encrypt(pubkey: string, plaintext: string): Promise<string>;
+      decrypt(pubkey: string, ciphertext: string): Promise<string>;
+    };
+  };
+}
+
+declare global {
+  interface Window extends NostrWindow {}
 }
 
 export default function MessagesClient() {
@@ -20,93 +37,210 @@ export default function MessagesClient() {
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const mounted = useRef(false);
+  const [chatPartnerProfile, setChatPartnerProfile] = useState<{ name?: string; picture?: string; } | undefined>(undefined);
   
   // Get pubkey from query parameter
   const pubkey = searchParams.get('pubkey');
 
+  // Validate required props
   useEffect(() => {
-    if (!user || !ndk || !pubkey) {
+    if (!pubkey || !publicKey || !ndk) {
       router.push('/');
-      return;
     }
+  }, [pubkey, publicKey, ndk, router]);
 
-    const loadMessages = async () => {
-      try {
-        const filter: NDKFilter = {
-          kinds: [4], // kind 4 is for encrypted direct messages
-          authors: [publicKey!, pubkey],
-          '#p': [pubkey, publicKey!],
-        };
-
-        const events = await ndk.fetchEvents(filter);
-        const sortedMessages = Array.from(events)
-          .map(event => ({
-            id: event.id,
-            content: event.content,
-            created_at: event.created_at!,
-            pubkey: event.pubkey,
-          }))
-          .sort((a, b) => a.created_at - b.created_at);
-
-        setMessages(sortedMessages);
-        setLoading(false);
-        scrollToBottom();
-      } catch (error) {
-        console.error('Error loading messages:', error);
-        setLoading(false);
-      }
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
     };
+  }, []);
 
-    // Subscribe to new messages
-    const subscription = ndk.subscribe(
-      {
-        kinds: [4],
-        authors: [publicKey!, pubkey],
-        '#p': [pubkey, publicKey!],
-        since: Math.floor(Date.now() / 1000),
-      },
-      {
-        closeOnEose: false,
+  const setMessagesIfMounted = useCallback((newMessages: Message[] | ((prev: Message[]) => Message[])) => {
+    if (mounted.current) {
+      setMessages(newMessages);
+    }
+  }, []);
+
+  const setLoadingIfMounted = useCallback((isLoading: boolean) => {
+    if (mounted.current) {
+      setLoading(isLoading);
+    }
+  }, []);
+
+  const loadMessages = useCallback(async () => {
+    if (!ndk || !publicKey || !pubkey) return;
+
+    try {
+      const nostr = window.nostr;
+      if (!nostr?.nip04) {
+        throw new Error('NIP-04 encryption not supported by extension');
       }
-    );
 
-    subscription.on('event', (event: NDKEvent) => {
-      setMessages(prev => [
-        ...prev,
-        {
-          id: event.id,
-          content: event.content,
-          created_at: event.created_at!,
-          pubkey: event.pubkey,
-        },
-      ]);
+      // Fetch chat partner's profile
+      const chatPartnerUser = ndk.getUser({ pubkey });
+      await chatPartnerUser.fetchProfile();
+      if (mounted.current) {
+        setChatPartnerProfile(chatPartnerUser.profile ? {
+          name: chatPartnerUser.profile.name,
+          picture: typeof chatPartnerUser.profile.picture === 'string' ? chatPartnerUser.profile.picture : undefined
+        } : undefined);
+      }
+
+      const filter: NDKFilter = {
+        kinds: [4],
+        authors: [publicKey, pubkey],
+        '#p': [pubkey, publicKey],
+      };
+
+      const events = await ndk.fetchEvents(filter);
+      const sortedMessages = await Promise.all(
+        Array.from(events).map((event: unknown) => {
+          const ndkEvent = event as NDKEvent;
+          return (async () => {
+            try {
+              const decryptedContent = await nostr.nip04!.decrypt(
+                ndkEvent.pubkey === publicKey ? pubkey : publicKey,
+                ndkEvent.content
+              );
+
+              const messageProfile = ndkEvent.pubkey === publicKey 
+                ? (user?.profile ? {
+                    name: user.profile.name,
+                    picture: typeof user.profile.picture === 'string' ? user.profile.picture : undefined
+                  } : undefined)
+                : chatPartnerUser.profile ? {
+                    name: chatPartnerUser.profile.name,
+                    picture: typeof chatPartnerUser.profile.picture === 'string' ? chatPartnerUser.profile.picture : undefined
+                  } : undefined;
+
+              return {
+                id: ndkEvent.id,
+                content: decryptedContent,
+                created_at: ndkEvent.created_at!,
+                pubkey: ndkEvent.pubkey,
+                profile: messageProfile
+              };
+            } catch (error) {
+              console.error('Error decrypting message:', error);
+              return {
+                id: ndkEvent.id,
+                content: '(Unable to decrypt message)',
+                created_at: ndkEvent.created_at!,
+                pubkey: ndkEvent.pubkey,
+                profile: ndkEvent.pubkey === publicKey 
+                  ? (user?.profile ? {
+                      name: user.profile.name,
+                      picture: typeof user.profile.picture === 'string' ? user.profile.picture : undefined
+                    } : undefined)
+                  : chatPartnerProfile
+              };
+            }
+          })();
+        })
+      );
+
+      sortedMessages.sort((a, b) => a.created_at - b.created_at);
+      setMessagesIfMounted(sortedMessages);
+      setLoadingIfMounted(false);
       scrollToBottom();
-    });
+    } catch (error) {
+      console.error('Error loading messages:', error);
+      setLoadingIfMounted(false);
+    }
+  }, [ndk, publicKey, pubkey, setMessagesIfMounted, setLoadingIfMounted, user, mounted]);
+
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, []);
+
+  useEffect(() => {
+    if (!ndk || !publicKey || !pubkey) return;
 
     loadMessages();
+
+    // Subscribe to new messages
+    const filter: NDKFilter = {
+      kinds: [4],
+      authors: [publicKey, pubkey],
+      '#p': [pubkey, publicKey],
+      since: Math.floor(Date.now() / 1000) // Only get messages from now onwards
+    };
+
+    const seenMessageIds = new Set<string>(); // Track seen message IDs
+    const subscription = ndk.subscribe(filter);
+    
+    subscription.on('event', async (event: NDKEvent) => {
+      if (!mounted.current) return;
+      
+      // Skip if we've already processed this message
+      if (seenMessageIds.has(event.id)) return;
+      seenMessageIds.add(event.id);
+      
+      try {
+        const nostr = window.nostr;
+        if (!nostr?.nip04) return;
+
+        const decryptedContent = await nostr.nip04.decrypt(
+          event.pubkey === publicKey ? pubkey : publicKey,
+          event.content
+        );
+
+        // Get the chat partner's profile for new messages
+        const messageProfile = event.pubkey === publicKey 
+          ? (user?.profile ? {
+              name: user.profile.name,
+              picture: typeof user.profile.picture === 'string' ? user.profile.picture : undefined
+            } : undefined)
+          : chatPartnerProfile;
+
+        const newMessage: Message = {
+          id: event.id,
+          content: decryptedContent,
+          created_at: event.created_at!,
+          pubkey: event.pubkey,
+          profile: messageProfile
+        };
+
+        setMessagesIfMounted(prev => {
+          // Check if message already exists in the array
+          if (prev.some(msg => msg.id === newMessage.id)) {
+            return prev;
+          }
+          const updatedMessages = [...prev, newMessage];
+          return updatedMessages.sort((a, b) => a.created_at - b.created_at);
+        });
+        scrollToBottom();
+      } catch (error) {
+        console.error('Error processing new message:', error);
+      }
+    });
 
     return () => {
       subscription.stop();
     };
-  }, [ndk, user, publicKey, pubkey, router]);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  }, [ndk, publicKey, pubkey, setMessagesIfMounted, scrollToBottom, user, chatPartnerProfile]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMessage.trim() || !ndk || !pubkey) return;
+    const nostr = window.nostr;
+    if (!newMessage.trim() || !ndk || !pubkey || !nostr?.nip04) {
+      console.error('Missing required components for sending message');
+      return;
+    }
 
     try {
+      // Encrypt the message content using the browser extension's nip04.encrypt
+      const encryptedContent = await nostr.nip04.encrypt(pubkey, newMessage);
+
+      // Create and publish the event
       const event = new NDKEvent(ndk);
       event.kind = 4;
-      event.content = newMessage;
+      event.content = encryptedContent;
       event.tags = [['p', pubkey]];
-
-      const recipientUser = ndk.getUser({ pubkey });
-      await event.encrypt(recipientUser);
       await event.publish();
+      
       setNewMessage('');
     } catch (error) {
       console.error('Error sending message:', error);
@@ -114,7 +248,7 @@ export default function MessagesClient() {
     }
   };
 
-  if (!pubkey) {
+  if (!pubkey || !publicKey || !ndk) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-2xl text-gray-600">Invalid user</div>
@@ -141,9 +275,18 @@ export default function MessagesClient() {
           >
             ← Back to Dashboard
           </button>
-          <h1 className="text-xl font-semibold text-gray-800">
-            Chat with {pubkey.slice(0, 8)}...
-          </h1>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full overflow-hidden">
+              <img
+                src={chatPartnerProfile?.picture || 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y'}
+                alt={chatPartnerProfile?.name || 'Anonymous'}
+                className="w-full h-full object-cover"
+              />
+            </div>
+            <h1 className="text-xl font-semibold text-gray-800">
+              Chat with {chatPartnerProfile?.name || pubkey.slice(0, 8)}...
+            </h1>
+          </div>
         </div>
       </header>
 
@@ -153,10 +296,19 @@ export default function MessagesClient() {
           {messages.map((message) => (
             <div
               key={message.id}
-              className={`flex ${
+              className={`flex items-start gap-2 ${
                 message.pubkey === publicKey ? 'justify-end' : 'justify-start'
               }`}
             >
+              {message.pubkey !== publicKey && (
+                <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0">
+                  <img
+                    src={message.profile?.picture || 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y'}
+                    alt={message.profile?.name || 'Anonymous'}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              )}
               <div
                 className={`max-w-[70%] p-3 rounded-lg ${
                   message.pubkey === publicKey
@@ -175,6 +327,15 @@ export default function MessagesClient() {
                   {new Date(message.created_at * 1000).toLocaleString()}
                 </p>
               </div>
+              {message.pubkey === publicKey && (
+                <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0">
+                  <img
+                    src={message.profile?.picture || 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y'}
+                    alt={message.profile?.name || 'Anonymous'}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              )}
             </div>
           ))}
           <div ref={messagesEndRef} />
