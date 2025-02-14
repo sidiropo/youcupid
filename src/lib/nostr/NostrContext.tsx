@@ -185,10 +185,12 @@ export function NostrProvider({ children }: { children: ReactNode }) {
   const [relays, setRelays] = useState<string[]>([
     'wss://relay.damus.io',
     'wss://nos.lol',
-    'wss://relay.nostr.band',
-    'wss://nostr.wine',
+    'wss://relay.current.fyi',
     'wss://relay.snort.social',
-    'wss://purplepag.es'
+    'wss://relay.primal.net',
+    'wss://eden.nostr.land',
+    'wss://nostr.mom',
+    'wss://relay.nostr.band'
   ]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -217,7 +219,14 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       
       // Try to connect in the background
       try {
-        await newNdk.connect();
+        // Set a timeout for the connection attempt
+        const connectPromise = newNdk.connect();
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Connection timeout')), 10000);
+        });
+        
+        await Promise.race([connectPromise, timeoutPromise]);
+        
         // After successful connection, fetch profile if we have a publicKey
         if (publicKey) {
           const ndkUser = newNdk.getUser({ pubkey: publicKey });
@@ -234,6 +243,9 @@ export function NostrProvider({ children }: { children: ReactNode }) {
             setUser(ndkUser);
           } catch (profileError) {
             console.error('Failed to fetch profile after NDK initialization:', profileError);
+            // Create a minimal user object even if profile fetch fails
+            const minimalUser = newNdk.getUser({ pubkey: publicKey });
+            setUser(minimalUser);
           }
         }
       }
