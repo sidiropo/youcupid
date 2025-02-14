@@ -14,7 +14,8 @@ import NDK, {
   NDKFilter, 
   NDKSigner, 
   NostrEvent,
-  NDKPrivateKeySigner
+  NDKPrivateKeySigner,
+  NDKRelay
 } from '@nostr-dev-kit/ndk';
 
 interface NDKUserProfile {
@@ -183,14 +184,11 @@ export function NostrProvider({ children }: { children: ReactNode }) {
     return null;
   });
   const [relays, setRelays] = useState<string[]>([
-    'wss://relay.damus.io',
     'wss://nos.lol',
-    'wss://relay.current.fyi',
     'wss://relay.snort.social',
-    'wss://relay.primal.net',
-    'wss://eden.nostr.land',
+    'wss://relay.damus.io',
     'wss://nostr.mom',
-    'wss://relay.nostr.band'
+    'wss://offchain.pub'
   ]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -208,6 +206,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       const newNdk = new NDK({
         explicitRelayUrls: relays,
         enableOutboxModel: true, // This helps with offline/failed relay scenarios
+        debug: true // Enable debug mode
       });
 
       // Set the signer after NDK instance is created
@@ -217,37 +216,27 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       // Don't wait for connect, just set the NDK instance
       setNdk(newNdk);
       
-      // Try to connect in the background
-      try {
-        // Set a timeout for the connection attempt
-        const connectPromise = newNdk.connect();
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('Connection timeout')), 10000);
-        });
-        
-        await Promise.race([connectPromise, timeoutPromise]);
-        
-        // After successful connection, fetch profile if we have a publicKey
-        if (publicKey) {
-          const ndkUser = newNdk.getUser({ pubkey: publicKey });
-          await ndkUser.fetchProfile();
-          setUser(ndkUser);
-        }
-      } catch (error) {
-        console.warn('Some relays failed to connect:', error);
-        // Even if some relays fail, try to fetch profile
-        if (publicKey) {
-          try {
-            const ndkUser = newNdk.getUser({ pubkey: publicKey });
-            await ndkUser.fetchProfile();
-            setUser(ndkUser);
-          } catch (profileError) {
-            console.error('Failed to fetch profile after NDK initialization:', profileError);
-            // Create a minimal user object even if profile fetch fails
-            const minimalUser = newNdk.getUser({ pubkey: publicKey });
-            setUser(minimalUser);
-          }
-        }
+      // Try to connect with a timeout
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Connection timeout')), 10000);
+      });
+      
+      const connectPromise = newNdk.connect();
+      await Promise.race([connectPromise, timeoutPromise]);
+      
+      // Check which relays are connected
+      const connectedRelays = Array.from(newNdk.pool.relays.values()).filter(r => r.connected).length;
+      console.log(`Connected to ${connectedRelays} relays`);
+      
+      if (connectedRelays === 0) {
+        throw new Error('Failed to connect to any relays');
+      }
+      
+      // After successful connection, fetch profile if we have a publicKey
+      if (publicKey) {
+        const ndkUser = newNdk.getUser({ pubkey: publicKey });
+        await ndkUser.fetchProfile();
+        setUser(ndkUser);
       }
     } catch (error) {
       console.error('Failed to initialize NDK:', error);
