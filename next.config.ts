@@ -2,11 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: 'export',
-  basePath: '/youcupid',
-  assetPrefix: '/youcupid',
   images: {
     unoptimized: true,
-    path: '/youcupid/_next/image'
   },
   trailingSlash: true,
   typescript: {
