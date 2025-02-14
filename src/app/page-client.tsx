@@ -11,7 +11,9 @@ export default function HomeClient() {
 
   useEffect(() => {
     // Check if nostr extension is available
-    setHasNostrExtension(!!window.nostr);
+    const hasExtension = !!window.nostr;
+    console.log('Nostr extension detected:', hasExtension, window.nostr);
+    setHasNostrExtension(hasExtension);
   }, []);
 
   useEffect(() => {
@@ -22,7 +24,10 @@ export default function HomeClient() {
 
   const handleLogin = async () => {
     try {
+      console.log('Login button clicked');
+      console.log('Current window.nostr state:', window.nostr);
       await login();
+      console.log('Login successful');
     } catch (error) {
       console.error('Login failed:', error);
       alert('Please make sure you have a nostr extension (like nos2x) installed and enabled.');

@@ -194,15 +194,20 @@ export function NostrProvider({ children }: { children: ReactNode }) {
 
   const initializeNDK = useCallback(async () => {
     // First check if nostr extension is available
+    console.log('Initializing NDK, checking for nostr extension...');
     if (!window.nostr) {
+      console.log('No nostr extension found during NDK initialization');
       setIsLoading(false);
       return;
     }
+    console.log('Nostr extension found:', window.nostr);
 
     try {
       // Create a signer that uses the browser extension
+      console.log('Creating browser extension signer...');
       const signer = new BrowserExtensionSigner();
       
+      console.log('Creating NDK instance with relays:', relays);
       const newNdk = new NDK({
         explicitRelayUrls: relays,
         enableOutboxModel: false // Disable outbox model as it might cause issues
@@ -218,7 +223,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       try {
         console.log('Attempting to connect to relays:', relays);
         await newNdk.connect();
-        console.log('Connected to relays');
+        console.log('Connected to relays successfully');
         
         // After successful connection, fetch profile if we have a publicKey
         if (publicKey) {
@@ -226,6 +231,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
           const ndkUser = newNdk.getUser({ pubkey: publicKey });
           await ndkUser.fetchProfile();
           setUser(ndkUser);
+          console.log('Profile fetched successfully');
         }
       } catch (error) {
         console.error('Failed to connect to relays:', error);
@@ -234,6 +240,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       }
     } catch (error) {
       console.error('Failed to initialize NDK:', error);
+      setIsLoading(false);
     }
   }, [relays, publicKey]);
 
@@ -287,20 +294,27 @@ export function NostrProvider({ children }: { children: ReactNode }) {
   }, [ndk, publicKey, fetchUserProfile]);
 
   const login = async () => {
-    if (!ndk) return;
+    if (!ndk) {
+      console.error('NDK not initialized during login attempt');
+      return;
+    }
     try {
+      console.log('Starting login process...');
       setIsLoading(true);
       // Check if nos2x extension is available
       if (!window.nostr) {
+        console.error('Nostr extension not found during login');
         throw new Error('Nostr extension not found');
       }
-
+      console.log('Requesting public key from extension...');
       const pubkey = await window.nostr.getPublicKey();
+      console.log('Received public key:', pubkey);
+      
       // Store publicKey in localStorage
       localStorage.setItem('nostr_pubkey', pubkey);
       setPublicKey(pubkey);
+      console.log('Login process completed successfully');
       
-      // Profile will be fetched by the useEffect hook when publicKey changes
     } catch (error) {
       console.error('Login failed:', error);
       throw error;
