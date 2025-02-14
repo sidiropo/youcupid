@@ -86,17 +86,29 @@ export default function DashboardClient() {
     // Load active chats
     const loadActiveChats = async () => {
       try {
-        const filter = {
+        // First get messages we sent
+        const sentFilter = {
           kinds: [4], // kind 4 is for encrypted direct messages
           authors: [publicKey],
           limit: 100,
         };
 
-        const events = await ndk.fetchEvents(filter);
+        // Also get messages sent to us
+        const receivedFilter = {
+          kinds: [4],
+          '#p': [publicKey], // messages where we are the recipient
+          limit: 100,
+        };
+
+        const [sentEvents, receivedEvents] = await Promise.all([
+          ndk.fetchEvents(sentFilter),
+          ndk.fetchEvents(receivedFilter)
+        ]);
+
         const chatMap = new Map<string, { content: string; created_at: number }>();
         
-        // Process events to get the latest message for each chat
-        for (const event of Array.from(events)) {
+        // Process sent messages
+        for (const event of Array.from(sentEvents)) {
           const ndkEvent = event as NDKEventWithTags;
           const recipient = ndkEvent.tags.find((tag: string[]) => tag[0] === 'p')?.[1];
           if (!recipient) continue;
@@ -108,14 +120,15 @@ export default function DashboardClient() {
               if (!nostr?.nip04) {
                 throw new Error('NIP-04 encryption not supported by extension');
               }
-              // Decrypt the message content
-              const decryptedContent = await nostr.nip04.decrypt(recipient, ndkEvent.content);
+              // Use the recipient's pubkey for decryption since we're the sender
+              const decryptionPubkey = recipient;
+              const decryptedContent = await nostr.nip04.decrypt(decryptionPubkey, ndkEvent.content);
               chatMap.set(recipient, {
                 content: decryptedContent,
                 created_at: ndkEvent.created_at!
               });
             } catch (error) {
-              console.error('Error decrypting message:', error);
+              console.error('Error decrypting sent message:', error);
               chatMap.set(recipient, {
                 content: '(Unable to decrypt message)',
                 created_at: ndkEvent.created_at!
@@ -124,6 +137,37 @@ export default function DashboardClient() {
           }
         }
 
+        // Process received messages
+        for (const event of Array.from(receivedEvents)) {
+          const ndkEvent = event as NDKEventWithTags;
+          const sender = ndkEvent.pubkey;
+          if (!sender) continue;
+
+          const existing = chatMap.get(sender);
+          if (!existing || existing.created_at < ndkEvent.created_at!) {
+            try {
+              const nostr = window.nostr;
+              if (!nostr?.nip04) {
+                throw new Error('NIP-04 encryption not supported by extension');
+              }
+              // Use the sender's pubkey for decryption since they sent it
+              const decryptionPubkey = sender;
+              const decryptedContent = await nostr.nip04.decrypt(decryptionPubkey, ndkEvent.content);
+              chatMap.set(sender, {
+                content: decryptedContent,
+                created_at: ndkEvent.created_at!
+              });
+            } catch (error) {
+              console.error('Error decrypting received message:', error);
+              chatMap.set(sender, {
+                content: '(Unable to decrypt message)',
+                created_at: ndkEvent.created_at!
+              });
+            }
+          }
+        }
+
+        // Convert to array and add profile information
         const defaultAvatar = 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y';
 
         // Convert to array and add profile information
@@ -311,10 +355,13 @@ export default function DashboardClient() {
         {/* Header */}
         <header className="flex justify-between items-center">
           <div className="flex items-center gap-2">
-            <img
-              src="/youcupid/youcupid.png"
+            <Image
+              src="/youcupid.png"
               alt="YouCupid Logo"
-              className="w-[70px] h-[70px] object-contain"
+              width={70}
+              height={70}
+              className="object-contain"
+              priority
             />
             <h1 className="text-3xl font-bold text-[#B71C5D]">YouCupid</h1>
           </div>

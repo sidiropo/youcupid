@@ -14,11 +14,11 @@ module.exports = {
         'custom-green': {
           50: '#f5f7f4',
           100: '#e8ede7',
-          500: '#99b991', // RGB: 153, 185, 145
-          600: '#8aa782', // Slightly darker for hover states
+          500: '#99b991',
+          600: '#8aa782',
         },
       },
     },
   },
   plugins: [],
-};
+} 

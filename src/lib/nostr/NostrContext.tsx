@@ -205,43 +205,35 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       
       const newNdk = new NDK({
         explicitRelayUrls: relays,
-        enableOutboxModel: true, // This helps with offline/failed relay scenarios
-        debug: true // Enable debug mode
+        enableOutboxModel: false // Disable outbox model as it might cause issues
       });
 
       // Set the signer after NDK instance is created
       newNdk.signer = signer;
       signer.setNDK(newNdk);
       
-      // Don't wait for connect, just set the NDK instance
+      // Set NDK instance first
       setNdk(newNdk);
       
-      // Try to connect with a timeout
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Connection timeout')), 10000);
-      });
-      
-      const connectPromise = newNdk.connect();
-      await Promise.race([connectPromise, timeoutPromise]);
-      
-      // Check which relays are connected
-      const connectedRelays = Array.from(newNdk.pool.relays.values()).filter(r => r.connected).length;
-      console.log(`Connected to ${connectedRelays} relays`);
-      
-      if (connectedRelays === 0) {
-        throw new Error('Failed to connect to any relays');
-      }
-      
-      // After successful connection, fetch profile if we have a publicKey
-      if (publicKey) {
-        const ndkUser = newNdk.getUser({ pubkey: publicKey });
-        await ndkUser.fetchProfile();
-        setUser(ndkUser);
+      try {
+        console.log('Attempting to connect to relays:', relays);
+        await newNdk.connect();
+        console.log('Connected to relays');
+        
+        // After successful connection, fetch profile if we have a publicKey
+        if (publicKey) {
+          console.log('Fetching profile for:', publicKey);
+          const ndkUser = newNdk.getUser({ pubkey: publicKey });
+          await ndkUser.fetchProfile();
+          setUser(ndkUser);
+        }
+      } catch (error) {
+        console.error('Failed to connect to relays:', error);
+      } finally {
+        setIsLoading(false);
       }
     } catch (error) {
       console.error('Failed to initialize NDK:', error);
-    } finally {
-      setIsLoading(false);
     }
   }, [relays, publicKey]);
 

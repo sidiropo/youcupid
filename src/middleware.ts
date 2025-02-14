@@ -9,9 +9,10 @@ export function middleware(request: NextRequest) {
   const cspHeader = `
     default-src 'self';
     script-src 'self' 'unsafe-eval' 'unsafe-inline';
-    style-src 'self' 'unsafe-inline';
-    img-src 'self' blob: data: https:;
-    font-src 'self';
+    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https:;
+    font-src 'self' https://fonts.gstatic.com data:;
+    img-src 'self' blob: data: https: http:;
+    connect-src 'self' ws: wss: https: http: blob:;
     object-src 'none';
     base-uri 'self';
     form-action 'self';
@@ -32,22 +33,7 @@ export function middleware(request: NextRequest) {
   return response;
 }
 
-// Specify which paths this middleware will run on
+// Only run middleware on specific paths
 export const config = {
-  matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - api (API routes)
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     */
-    {
-      source: '/((?!api|_next/static|_next/image|favicon.ico).*)',
-      missing: [
-        { type: 'header', key: 'next-router-prefetch' },
-        { type: 'header', key: 'purpose', value: 'prefetch' },
-      ],
-    },
-  ],
+  matcher: '/:path*',
 }; 
