@@ -242,10 +242,8 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       // Handle connection issues by monitoring disconnect events
       newNdk.pool.on('relay:disconnect', (relay: NDKRelay) => {
         console.log(`Error with relay ${relay.url}`);
-        // Only remove relay if we have more than 2 relays to maintain minimum connectivity
-        if (relays.length > 2) {
-          removeRelay(relay.url);
-        }
+        // If a relay disconnects, try to remove it
+        removeRelay(relay.url);
       });
 
       // Set the signer after NDK instance is created
@@ -257,42 +255,27 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       
       try {
         console.log('Attempting to connect to relays:', relays);
-        // Try to connect to at least one relay with a longer timeout
-        const connectPromise = newNdk.connect();
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Connection timeout')), 5000)
-        );
-        
-        await Promise.race([connectPromise, timeoutPromise]);
+        await newNdk.connect(2000);  // Add timeout of 2 seconds
         console.log('Connected to relays successfully');
         
         // After successful connection, fetch profile if we have a publicKey
         if (publicKey) {
           console.log('Fetching profile for:', publicKey);
           const ndkUser = newNdk.getUser({ pubkey: publicKey });
-          try {
-            await ndkUser.fetchProfile();
-            setUser(ndkUser);
-            console.log('Profile fetched successfully');
-          } catch (profileError) {
-            console.error('Failed to fetch profile:', profileError);
-            // Still set the user even if profile fetch fails
-            setUser(ndkUser);
-          }
+          await ndkUser.fetchProfile();
+          setUser(ndkUser);
+          console.log('Profile fetched successfully');
         }
       } catch (error) {
         console.error('Failed to connect to relays:', error);
-        // If connection fails, clear the NDK instance to allow retry
-        setNdk(null);
-        throw error;
+        // Even if relay connection fails, we still want to keep the NDK instance
+        setNdk(newNdk);
       } finally {
         setIsLoading(false);
       }
     } catch (error) {
       console.error('Failed to initialize NDK:', error);
-      setNdk(null);
       setIsLoading(false);
-      throw error;
     }
   }, [relays, publicKey]);
 
@@ -366,31 +349,22 @@ export function NostrProvider({ children }: { children: ReactNode }) {
   }, [ndk, publicKey, fetchUserProfile]);
 
   const login = async () => {
-    if (!window.nostr) {
-      console.error('Nostr extension not found during login');
-      throw new Error('Nostr extension not found');
+    if (!ndk) {
+      console.error('NDK not initialized during login attempt');
+      return;
     }
-
     try {
       console.log('Starting login process...');
       setIsLoading(true);
-
-      // Get public key first
+      // Check if nos2x extension is available
+      if (!window.nostr) {
+        console.error('Nostr extension not found during login');
+        throw new Error('Nostr extension not found');
+      }
       console.log('Requesting public key from extension...');
       const pubkey = await window.nostr.getPublicKey();
       console.log('Received public key:', pubkey);
       
-      // Initialize NDK if not already initialized
-      if (!ndk) {
-        console.log('NDK not initialized, initializing...');
-        try {
-          await initializeNDK();
-        } catch (error) {
-          console.error('Failed to initialize NDK during login:', error);
-          throw new Error('Failed to connect to relays. Please try again.');
-        }
-      }
-
       // Store publicKey in localStorage
       localStorage.setItem('nostr_pubkey', pubkey);
       setPublicKey(pubkey);
@@ -398,11 +372,6 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       
     } catch (error) {
       console.error('Login failed:', error);
-      // Clear any partial state on failure
-      localStorage.removeItem('nostr_pubkey');
-      setPublicKey(null);
-      setUser(null);
-      setNdk(null);
       throw error;
     } finally {
       setIsLoading(false);

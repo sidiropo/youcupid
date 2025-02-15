@@ -378,10 +378,10 @@ export default function DashboardClient() {
         {/* Tabs */}
         <div className="bg-white rounded-lg shadow-sm overflow-hidden">
           <div className="border-b">
-            <nav className="flex overflow-x-auto whitespace-nowrap hide-scrollbar">
+            <nav className="flex">
               <button
                 onClick={() => setActiveTab('profile')}
-                className={`px-4 sm:px-6 py-3 text-sm font-medium ${
+                className={`px-6 py-3 text-sm font-medium ${
                   activeTab === 'profile'
                     ? 'border-b-2 border-custom-green-500 text-custom-green-600'
                     : 'text-gray-700 hover:text-gray-900'
@@ -391,7 +391,7 @@ export default function DashboardClient() {
               </button>
               <button
                 onClick={() => setActiveTab('matches')}
-                className={`px-4 sm:px-6 py-3 text-sm font-medium ${
+                className={`px-6 py-3 text-sm font-medium ${
                   activeTab === 'matches'
                     ? 'border-b-2 border-custom-green-500 text-custom-green-600'
                     : 'text-gray-700 hover:text-gray-900'
@@ -401,7 +401,7 @@ export default function DashboardClient() {
               </button>
               <button
                 onClick={() => setActiveTab('chats')}
-                className={`px-4 sm:px-6 py-3 text-sm font-medium ${
+                className={`px-6 py-3 text-sm font-medium ${
                   activeTab === 'chats'
                     ? 'border-b-2 border-custom-green-500 text-custom-green-600'
                     : 'text-gray-700 hover:text-gray-900'
@@ -411,7 +411,7 @@ export default function DashboardClient() {
               </button>
               <button
                 onClick={() => setActiveTab('created-matches')}
-                className={`px-4 sm:px-6 py-3 text-sm font-medium ${
+                className={`px-6 py-3 text-sm font-medium ${
                   activeTab === 'created-matches'
                     ? 'border-b-2 border-custom-green-500 text-custom-green-600'
                     : 'text-gray-700 hover:text-gray-900'
@@ -421,7 +421,7 @@ export default function DashboardClient() {
               </button>
               <button
                 onClick={() => setActiveTab('friends')}
-                className={`px-4 sm:px-6 py-3 text-sm font-medium ${
+                className={`px-6 py-3 text-sm font-medium ${
                   activeTab === 'friends'
                     ? 'border-b-2 border-custom-green-500 text-custom-green-600'
                     : 'text-gray-700 hover:text-gray-900'
@@ -431,7 +431,7 @@ export default function DashboardClient() {
               </button>
               <button
                 onClick={() => setActiveTab('relays')}
-                className={`px-4 sm:px-6 py-3 text-sm font-medium ${
+                className={`px-6 py-3 text-sm font-medium ${
                   activeTab === 'relays'
                     ? 'border-b-2 border-custom-green-500 text-custom-green-600'
                     : 'text-gray-700 hover:text-gray-900'
@@ -442,7 +442,7 @@ export default function DashboardClient() {
             </nav>
           </div>
 
-          <div className="p-3 sm:p-6">
+          <div className="p-6">
             {/* Profile Tab */}
             {activeTab === 'profile' && (
               <div className="max-w-2xl mx-auto">
