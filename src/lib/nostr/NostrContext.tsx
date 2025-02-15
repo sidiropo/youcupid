@@ -184,11 +184,12 @@ export function NostrProvider({ children }: { children: ReactNode }) {
     return null;
   });
   const [relays, setRelays] = useState<string[]>([
+    'wss://relay.nostr.band',  // More reliable relay
     'wss://nos.lol',
     'wss://relay.snort.social',
-    'wss://relay.damus.io',
     'wss://nostr.mom',
-    'wss://offchain.pub'
+    'wss://relay.current.fyi',  // Additional reliable relay
+    'wss://purplepag.es'  // Additional reliable relay
   ]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -226,7 +227,23 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       console.log('Creating NDK instance with relays:', relays);
       const newNdk = new NDK({
         explicitRelayUrls: relays,
-        enableOutboxModel: false // Disable outbox model as it might cause issues
+        enableOutboxModel: false
+      });
+
+      // Set up relay connection error handling
+      newNdk.pool.on('relay:connect', (relay: NDKRelay) => {
+        console.log(`Connected to relay: ${relay.url}`);
+      });
+
+      newNdk.pool.on('relay:disconnect', (relay: NDKRelay) => {
+        console.log(`Disconnected from relay: ${relay.url}`);
+      });
+
+      // Handle connection issues by monitoring disconnect events
+      newNdk.pool.on('relay:disconnect', (relay: NDKRelay) => {
+        console.log(`Error with relay ${relay.url}`);
+        // If a relay disconnects, try to remove it
+        removeRelay(relay.url);
       });
 
       // Set the signer after NDK instance is created
@@ -238,7 +255,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       
       try {
         console.log('Attempting to connect to relays:', relays);
-        await newNdk.connect();
+        await newNdk.connect(2000);  // Add timeout of 2 seconds
         console.log('Connected to relays successfully');
         
         // After successful connection, fetch profile if we have a publicKey
