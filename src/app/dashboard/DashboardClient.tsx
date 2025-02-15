@@ -784,43 +784,45 @@ export default function DashboardClient() {
                   {friends.map((friend) => (
                     <div
                       key={friend.pubkey}
-                      className={`p-4 border rounded-lg transition-colors flex justify-between items-center ${
+                      className={`p-4 border rounded-lg transition-colors ${
                         selectedFriends.includes(friend.pubkey) ? 'border-custom-green-500 bg-custom-green-50' : 'hover:border-gray-300'
                       }`}
                     >
-                      <div className="flex items-center flex-grow">
-                        <div className="w-12 h-12 rounded-full overflow-hidden flex-shrink-0 mr-4">
-                          <img
-                            src={friend.profile?.picture || 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y'}
-                            alt={friend.profile?.name || 'Anonymous'}
-                            className="w-full h-full object-cover"
-                          />
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                        <div className="flex items-center flex-grow min-w-0">
+                          <div className="w-12 h-12 rounded-full overflow-hidden flex-shrink-0 mr-4">
+                            <img
+                              src={friend.profile?.picture || 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y'}
+                              alt={friend.profile?.name || 'Anonymous'}
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                          <div className="min-w-0">
+                            <h3 className="font-semibold text-gray-900 truncate">{friend.profile?.name || 'Anonymous'}</h3>
+                            <p className="text-sm text-gray-700 truncate">{friend.pubkey}</p>
+                          </div>
                         </div>
-                        <div>
-                          <h3 className="font-semibold text-gray-900">{friend.profile?.name || 'Anonymous'}</h3>
-                          <p className="text-sm text-gray-700 truncate">{friend.pubkey}</p>
+                        <div className="flex gap-2 mt-4 sm:mt-0">
+                          <button
+                            onClick={() => router.push(`/messages?pubkey=${friend.pubkey}`)}
+                            className="flex-1 sm:flex-none px-4 py-2 bg-custom-green-500 text-white rounded-lg hover:bg-custom-green-600"
+                          >
+                            Chat
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleFriendSelect(friend.pubkey);
+                            }}
+                            className={`flex-1 sm:flex-none px-4 py-2 rounded-lg border ${
+                              selectedFriends.includes(friend.pubkey)
+                                ? 'bg-[#B71C5D] text-white hover:bg-[#9D1850] border-transparent'
+                                : 'border-custom-green-500 text-custom-green-500 hover:bg-custom-green-50'
+                            }`}
+                          >
+                            {selectedFriends.includes(friend.pubkey) ? 'Unselect' : 'Match'}
+                          </button>
                         </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => router.push(`/messages?pubkey=${friend.pubkey}`)}
-                          className="px-4 py-2 bg-custom-green-500 text-white rounded-lg hover:bg-custom-green-600"
-                        >
-                          Chat
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.preventDefault();
-                            handleFriendSelect(friend.pubkey);
-                          }}
-                          className={`px-4 py-2 rounded-lg border ${
-                            selectedFriends.includes(friend.pubkey)
-                              ? 'bg-[#B71C5D] text-white hover:bg-[#9D1850] border-transparent'
-                              : 'border-custom-green-500 text-custom-green-500 hover:bg-custom-green-50'
-                          }`}
-                        >
-                          {selectedFriends.includes(friend.pubkey) ? 'Unselect' : 'Match'}
-                        </button>
                       </div>
                     </div>
                   ))}
