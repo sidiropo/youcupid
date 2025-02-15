@@ -377,8 +377,8 @@ export default function DashboardClient() {
 
         {/* Tabs */}
         <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-          <div className="border-b">
-            <nav className="flex">
+          <div className="border-b overflow-x-auto">
+            <nav className="flex whitespace-nowrap min-w-max">
               <button
                 onClick={() => setActiveTab('profile')}
                 className={`px-6 py-3 text-sm font-medium ${
