@@ -184,40 +184,32 @@ export function NostrProvider({ children }: { children: ReactNode }) {
     return null;
   });
   const [relays, setRelays] = useState<string[]>([
-    'wss://relay.nostr.band',  // More reliable relay
-    'wss://nos.lol',
-    'wss://relay.snort.social',
-    'wss://nostr.mom',
-    'wss://relay.current.fyi',  // Additional reliable relay
-    'wss://purplepag.es'  // Additional reliable relay
+    'wss://relay.nostr.band',  // Primary relay
+    'wss://nos.lol',          // Backup relay
+    'wss://relay.current.fyi'  // Backup relay
   ]);
   const [isLoading, setIsLoading] = useState(true);
+  const [connectionAttempts, setConnectionAttempts] = useState(0);
+  const MAX_CONNECTION_ATTEMPTS = 3;
 
   const initializeNDK = useCallback(async () => {
     // First check if nostr extension is available
     console.log('Initializing NDK, checking for nostr extension...');
     
-    // Wait for extension to be available (up to 5 seconds)
-    let attempts = 0;
-    while (!window.nostr && attempts < 50) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-      attempts++;
-    }
-
     if (!window.nostr) {
-      console.log('No nostr extension found during NDK initialization after waiting');
+      console.log('No nostr extension found during NDK initialization');
       setIsLoading(false);
-      // Add a listener for when the extension becomes available
-      const checkForExtension = setInterval(() => {
-        if (window.nostr) {
-          console.log('Nostr extension became available, reinitializing NDK...');
-          clearInterval(checkForExtension);
-          initializeNDK();
-        }
-      }, 1000);
       return;
     }
+    
     console.log('Nostr extension found:', window.nostr);
+
+    // If we've tried too many times, stop trying
+    if (connectionAttempts >= MAX_CONNECTION_ATTEMPTS) {
+      console.log('Max connection attempts reached, stopping initialization');
+      setIsLoading(false);
+      return;
+    }
 
     try {
       // Create a signer that uses the browser extension
@@ -237,13 +229,10 @@ export function NostrProvider({ children }: { children: ReactNode }) {
 
       newNdk.pool.on('relay:disconnect', (relay: NDKRelay) => {
         console.log(`Disconnected from relay: ${relay.url}`);
-      });
-
-      // Handle connection issues by monitoring disconnect events
-      newNdk.pool.on('relay:disconnect', (relay: NDKRelay) => {
-        console.log(`Error with relay ${relay.url}`);
-        // If a relay disconnects, try to remove it
-        removeRelay(relay.url);
+        // Only remove relay if we have more than one left
+        if (relays.length > 1) {
+          removeRelay(relay.url);
+        }
       });
 
       // Set the signer after NDK instance is created
@@ -255,8 +244,9 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       
       try {
         console.log('Attempting to connect to relays:', relays);
-        await newNdk.connect(2000);  // Add timeout of 2 seconds
+        await newNdk.connect(5000);  // Increased timeout to 5 seconds
         console.log('Connected to relays successfully');
+        setConnectionAttempts(0); // Reset attempts on success
         
         // After successful connection, fetch profile if we have a publicKey
         if (publicKey) {
@@ -268,16 +258,23 @@ export function NostrProvider({ children }: { children: ReactNode }) {
         }
       } catch (error) {
         console.error('Failed to connect to relays:', error);
-        // Even if relay connection fails, we still want to keep the NDK instance
-        setNdk(newNdk);
+        setConnectionAttempts(prev => prev + 1);
+        // If we still have attempts left, try again with remaining relays
+        if (connectionAttempts < MAX_CONNECTION_ATTEMPTS - 1) {
+          console.log('Retrying connection with remaining relays...');
+          setTimeout(initializeNDK, 1000); // Wait 1 second before retrying
+        } else {
+          console.log('Max connection attempts reached');
+        }
       } finally {
         setIsLoading(false);
       }
     } catch (error) {
       console.error('Failed to initialize NDK:', error);
       setIsLoading(false);
+      setConnectionAttempts(prev => prev + 1);
     }
-  }, [relays, publicKey]);
+  }, [relays, publicKey, connectionAttempts]);
 
   useEffect(() => {
     initializeNDK();
