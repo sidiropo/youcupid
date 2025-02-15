@@ -192,8 +192,27 @@ export function NostrProvider({ children }: { children: ReactNode }) {
   const [connectionAttempts, setConnectionAttempts] = useState(0);
   const MAX_CONNECTION_ATTEMPTS = 3;
   const [connectedRelays, setConnectedRelays] = useState<Set<string>>(new Set());
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  const removeRelay = useCallback(async (relay: string) => {
+    setRelays(prev => prev.filter((r) => r !== relay));
+  }, []);
+
+  const addRelay = useCallback(async (relay: string) => {
+    setRelays(prev => {
+      if (!prev.includes(relay)) {
+        return [...prev, relay];
+      }
+      return prev;
+    });
+  }, []);
 
   const initializeNDK = useCallback(async () => {
+    // Prevent multiple initialization attempts
+    if (isInitialized) {
+      return true;
+    }
+
     // Don't check for extension here, we'll do it during login
     console.log('Initializing NDK...');
     
@@ -201,7 +220,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
     if (connectionAttempts >= MAX_CONNECTION_ATTEMPTS) {
       console.log('Max connection attempts reached, stopping initialization');
       setIsLoading(false);
-      return;
+      return false;
     }
 
     try {
@@ -253,6 +272,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
         await Promise.race([connectPromise, timeoutPromise]);
         console.log('Connected to relays successfully');
         setConnectionAttempts(0); // Reset attempts on success
+        setIsInitialized(true);
         
         // After successful connection, fetch profile if we have a publicKey
         if (publicKey) {
@@ -280,7 +300,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
           if (alternativeRelays.length > 0) {
             const newRelay = alternativeRelays[0];
             console.log(`Adding alternative relay: ${newRelay}`);
-            setRelays(prev => [...prev, newRelay]);
+            await addRelay(newRelay);
           }
         }
         return false; // Indicate failed initialization
@@ -293,17 +313,20 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       setConnectionAttempts(prev => prev + 1);
       return false; // Indicate failed initialization
     }
-  }, [relays, publicKey, connectionAttempts, connectedRelays.size]);
+  }, [connectionAttempts, publicKey, relays, removeRelay, addRelay, isInitialized]);
 
+  // Only initialize once when the component mounts
   useEffect(() => {
-    initializeNDK();
-  }, [initializeNDK]);
+    if (!isInitialized) {
+      initializeNDK();
+    }
+  }, [initializeNDK, isInitialized]);
 
   const fetchUserProfile = useCallback(async () => {
     if (!ndk || !publicKey) return;
+
     try {
       console.log('Fetching user profile for:', publicKey);
-      console.log('Connected relays:', Array.from(ndk.pool.relays.keys()));
       
       // First try to get the profile directly from the network
       const profileFilter: NDKFilter = {
@@ -319,37 +342,24 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       const fetchPromise = ndk.fetchEvents(profileFilter);
       const profileEvents = await Promise.race([fetchPromise, timeoutPromise]);
       
-      console.log('Found profile events:', profileEvents.size);
+      if (profileEvents.size === 0) {
+        console.log('No profile events found');
+        return;
+      }
       
       // Get the most recent profile event
       const events = Array.from(profileEvents) as NDKEvent[];
-      console.log('All profile events:', events.map(e => ({ 
-        created_at: e.created_at,
-        content: e.content
-      })));
-      
       const profileEvent = events.sort((a, b) => (b.created_at || 0) - (a.created_at || 0))[0];
       
       if (profileEvent) {
-        console.log('Found most recent profile event:', {
-          id: profileEvent.id,
-          created_at: profileEvent.created_at,
-          content: profileEvent.content
-        });
         try {
           const content = JSON.parse(profileEvent.content);
-          console.log('Parsed profile content:', content);
           const ndkUser = ndk.getUser({ pubkey: publicKey });
           ndkUser.profile = content;
           setUser(ndkUser);
-          console.log('Updated user state with profile:', ndkUser.profile);
         } catch (parseError) {
           console.error('Failed to parse profile content:', parseError);
         }
-      } else {
-        console.log('No profile event found, creating empty profile');
-        const ndkUser = ndk.getUser({ pubkey: publicKey });
-        setUser(ndkUser);
       }
     } catch (error) {
       console.error('Failed to fetch user profile:', error);
@@ -358,11 +368,10 @@ export function NostrProvider({ children }: { children: ReactNode }) {
 
   // Only fetch profile when NDK changes or when profile is updated
   useEffect(() => {
-    if (ndk && publicKey) {
-      console.log('Triggering profile fetch due to NDK or publicKey change');
+    if (ndk && publicKey && !user) {
       fetchUserProfile();
     }
-  }, [ndk, publicKey, fetchUserProfile]);
+  }, [ndk, publicKey, user, fetchUserProfile]);
 
   const login = async () => {
     try {
@@ -376,7 +385,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       }
 
       // Initialize NDK if not already initialized
-      if (!ndk) {
+      if (!isInitialized) {
         console.log('NDK not initialized, attempting to initialize...');
         const success = await initializeNDK();
         if (!success) {
@@ -406,16 +415,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem('nostr_pubkey');
     setUser(null);
     setPublicKey(null);
-  };
-
-  const addRelay = async (relay: string) => {
-    if (!relays.includes(relay)) {
-      setRelays([...relays, relay]);
-    }
-  };
-
-  const removeRelay = async (relay: string) => {
-    setRelays(relays.filter((r) => r !== relay));
+    setIsInitialized(false); // Reset initialization state on logout
   };
 
   const getFriends = async () => {
