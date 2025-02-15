@@ -194,17 +194,9 @@ export function NostrProvider({ children }: { children: ReactNode }) {
   const [connectedRelays, setConnectedRelays] = useState<Set<string>>(new Set());
 
   const initializeNDK = useCallback(async () => {
-    // First check if nostr extension is available
-    console.log('Initializing NDK, checking for nostr extension...');
+    // Don't check for extension here, we'll do it during login
+    console.log('Initializing NDK...');
     
-    if (!window.nostr) {
-      console.log('No nostr extension found during NDK initialization');
-      setIsLoading(false);
-      return;
-    }
-    
-    console.log('Nostr extension found:', window.nostr);
-
     // If we've tried too many times, stop trying
     if (connectionAttempts >= MAX_CONNECTION_ATTEMPTS) {
       console.log('Max connection attempts reached, stopping initialization');
@@ -270,6 +262,8 @@ export function NostrProvider({ children }: { children: ReactNode }) {
           setUser(ndkUser);
           console.log('Profile fetched successfully');
         }
+
+        return true; // Indicate successful initialization
       } catch (error) {
         console.error('Failed to connect to relays:', error);
         setConnectionAttempts(prev => prev + 1);
@@ -288,10 +282,8 @@ export function NostrProvider({ children }: { children: ReactNode }) {
             console.log(`Adding alternative relay: ${newRelay}`);
             setRelays(prev => [...prev, newRelay]);
           }
-          
-          // Try again with a delay
-          setTimeout(initializeNDK, 2000);
         }
+        return false; // Indicate failed initialization
       } finally {
         setIsLoading(false);
       }
@@ -299,6 +291,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       console.error('Failed to initialize NDK:', error);
       setIsLoading(false);
       setConnectionAttempts(prev => prev + 1);
+      return false; // Indicate failed initialization
     }
   }, [relays, publicKey, connectionAttempts, connectedRelays.size]);
 
@@ -372,18 +365,25 @@ export function NostrProvider({ children }: { children: ReactNode }) {
   }, [ndk, publicKey, fetchUserProfile]);
 
   const login = async () => {
-    if (!ndk) {
-      console.error('NDK not initialized during login attempt');
-      return;
-    }
     try {
       console.log('Starting login process...');
       setIsLoading(true);
+
       // Check if nos2x extension is available
       if (!window.nostr) {
         console.error('Nostr extension not found during login');
         throw new Error('Nostr extension not found');
       }
+
+      // Initialize NDK if not already initialized
+      if (!ndk) {
+        console.log('NDK not initialized, attempting to initialize...');
+        const success = await initializeNDK();
+        if (!success) {
+          throw new Error('Failed to initialize NDK');
+        }
+      }
+
       console.log('Requesting public key from extension...');
       const pubkey = await window.nostr.getPublicKey();
       console.log('Received public key:', pubkey);
