@@ -184,13 +184,14 @@ export function NostrProvider({ children }: { children: ReactNode }) {
     return null;
   });
   const [relays, setRelays] = useState<string[]>([
-    'wss://relay.nostr.band',  // Primary relay
-    'wss://nos.lol',          // Backup relay
-    'wss://relay.current.fyi'  // Backup relay
+    'wss://relay.damus.io',     // Very reliable relay
+    'wss://relay.nostr.band',   // Backup relay
+    'wss://nos.lol'            // Backup relay
   ]);
   const [isLoading, setIsLoading] = useState(true);
   const [connectionAttempts, setConnectionAttempts] = useState(0);
   const MAX_CONNECTION_ATTEMPTS = 3;
+  const [connectedRelays, setConnectedRelays] = useState<Set<string>>(new Set());
 
   const initializeNDK = useCallback(async () => {
     // First check if nostr extension is available
@@ -225,12 +226,20 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       // Set up relay connection error handling
       newNdk.pool.on('relay:connect', (relay: NDKRelay) => {
         console.log(`Connected to relay: ${relay.url}`);
+        setConnectedRelays(prev => new Set([...prev, relay.url]));
       });
 
       newNdk.pool.on('relay:disconnect', (relay: NDKRelay) => {
         console.log(`Disconnected from relay: ${relay.url}`);
-        // Only remove relay if we have more than one left
-        if (relays.length > 1) {
+        setConnectedRelays(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(relay.url);
+          return newSet;
+        });
+        
+        // Handle disconnected relay
+        if (connectedRelays.size > 1 || relays.length > 1) {
+          console.log(`Removing problematic relay: ${relay.url}`);
           removeRelay(relay.url);
         }
       });
@@ -244,7 +253,12 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       
       try {
         console.log('Attempting to connect to relays:', relays);
-        await newNdk.connect(5000);  // Increased timeout to 5 seconds
+        const connectPromise = newNdk.connect();
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Connection timeout')), 10000) // 10 second timeout
+        );
+
+        await Promise.race([connectPromise, timeoutPromise]);
         console.log('Connected to relays successfully');
         setConnectionAttempts(0); // Reset attempts on success
         
@@ -259,12 +273,24 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       } catch (error) {
         console.error('Failed to connect to relays:', error);
         setConnectionAttempts(prev => prev + 1);
-        // If we still have attempts left, try again with remaining relays
-        if (connectionAttempts < MAX_CONNECTION_ATTEMPTS - 1) {
-          console.log('Retrying connection with remaining relays...');
-          setTimeout(initializeNDK, 1000); // Wait 1 second before retrying
-        } else {
-          console.log('Max connection attempts reached');
+        
+        // If we have no connected relays, try to switch to alternative relays
+        if (connectedRelays.size === 0 && connectionAttempts < MAX_CONNECTION_ATTEMPTS - 1) {
+          console.log('No relays connected, switching to alternative relays...');
+          const alternativeRelays = [
+            'wss://nostr.mom',
+            'wss://relay.snort.social',
+            'wss://purplepag.es'
+          ].filter(r => !relays.includes(r));
+          
+          if (alternativeRelays.length > 0) {
+            const newRelay = alternativeRelays[0];
+            console.log(`Adding alternative relay: ${newRelay}`);
+            setRelays(prev => [...prev, newRelay]);
+          }
+          
+          // Try again with a delay
+          setTimeout(initializeNDK, 2000);
         }
       } finally {
         setIsLoading(false);
@@ -274,7 +300,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
       setConnectionAttempts(prev => prev + 1);
     }
-  }, [relays, publicKey, connectionAttempts]);
+  }, [relays, publicKey, connectionAttempts, connectedRelays.size]);
 
   useEffect(() => {
     initializeNDK();
