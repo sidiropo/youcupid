@@ -220,6 +220,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
     if (connectionAttempts >= MAX_CONNECTION_ATTEMPTS) {
       console.log('Max connection attempts reached, stopping initialization');
       setIsLoading(false);
+      setIsInitialized(false); // Reset initialization state on failure
       return false;
     }
 
@@ -248,7 +249,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
           return newSet;
         });
         
-        // Handle disconnected relay
+        // Only remove relay if we have others available
         if (connectedRelays.size > 1 || relays.length > 1) {
           console.log(`Removing problematic relay: ${relay.url}`);
           removeRelay(relay.url);
@@ -270,6 +271,27 @@ export function NostrProvider({ children }: { children: ReactNode }) {
         );
 
         await Promise.race([connectPromise, timeoutPromise]);
+        
+        // Wait for at least one relay to connect
+        const waitForRelayConnection = new Promise((resolve, reject) => {
+          const checkRelays = () => {
+            if (connectedRelays.size > 0) {
+              resolve(true);
+            } else if (connectionAttempts >= MAX_CONNECTION_ATTEMPTS) {
+              reject(new Error('Failed to connect to any relays'));
+            }
+          };
+          
+          // Check every second for 10 seconds
+          const interval = setInterval(checkRelays, 1000);
+          setTimeout(() => {
+            clearInterval(interval);
+            reject(new Error('Relay connection timeout'));
+          }, 10000);
+        });
+
+        await waitForRelayConnection;
+        
         console.log('Connected to relays successfully');
         setConnectionAttempts(0); // Reset attempts on success
         setIsInitialized(true);
@@ -303,17 +325,19 @@ export function NostrProvider({ children }: { children: ReactNode }) {
             await addRelay(newRelay);
           }
         }
+        
+        setIsInitialized(false); // Reset initialization state on failure
         return false; // Indicate failed initialization
-      } finally {
-        setIsLoading(false);
       }
     } catch (error) {
       console.error('Failed to initialize NDK:', error);
-      setIsLoading(false);
       setConnectionAttempts(prev => prev + 1);
+      setIsInitialized(false); // Reset initialization state on failure
       return false; // Indicate failed initialization
+    } finally {
+      setIsLoading(false);
     }
-  }, [connectionAttempts, publicKey, relays, removeRelay, addRelay, isInitialized]);
+  }, [connectionAttempts, publicKey, relays, removeRelay, addRelay, isInitialized, connectedRelays]);
 
   // Only initialize once when the component mounts
   useEffect(() => {
@@ -389,7 +413,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
         console.log('NDK not initialized, attempting to initialize...');
         const success = await initializeNDK();
         if (!success) {
-          throw new Error('Failed to initialize NDK');
+          throw new Error('Failed to initialize NDK: Could not connect to any relays');
         }
       }
 
@@ -404,6 +428,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       
     } catch (error) {
       console.error('Login failed:', error);
+      setIsInitialized(false); // Reset initialization state on failure
       throw error;
     } finally {
       setIsLoading(false);
