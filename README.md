@@ -7,13 +7,13 @@ https://sidiropo.github.io/youcupid/
 
 ## Screenshots
 
-![Dashboard View](/screenshot1.png)
+![Dashboard View](/public/screenshot1.png)
 
-![Messages Interface](/screenshot2.png)
+![Messages Interface](/public/screenshot2.png)
 
-![Profile View](/screenshot3.png)
+![Profile View](/public/screenshot3.png)
 
-![Matching Interface](/screenshot4.png)
+![Matching Interface](/public/screenshot4.png)
 
 ## Contributing
 
