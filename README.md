@@ -3,6 +3,8 @@
 YouCupid is a decentralized dating application built on the nostr protocol.
 Users can match any two of their friends.
 
+https://sidiropo.github.io/youcupid/
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
